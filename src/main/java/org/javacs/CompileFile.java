@@ -86,8 +86,55 @@ public class CompileFile {
         return Optional.of(el);
     }
 
-    public Optional<TreePath> path(Element e) {
-        return Optional.ofNullable(trees.getPath(e));
+    public Interpreter interpreter(int line, int character) {
+        var cursor = root.getLineMap().getPosition(line, character);
+        var pos = trees.getSourcePositions();
+        class FindScope extends TreePathScanner<Void, Void> {
+            TreePath found;
+
+            boolean containsCursor(Tree t) {
+                var start = pos.getStartPosition(root, t);
+                var end = pos.getEndPosition(root, t);
+                if (start <= cursor && cursor <= end) {
+                    return true;
+                }
+                return false;
+            }
+
+            @Override
+            public Void visitClass(ClassTree t, Void __) {
+                if (containsCursor(t)) {
+                    found = getCurrentPath();
+                }
+                return super.visitClass(t, null);
+            }
+
+            @Override
+            public Void visitBlock(BlockTree t, Void __) {
+                if (containsCursor(t)) {
+                    found = getCurrentPath();
+                    for (var line : t.getStatements()) {
+                        var end = pos.getEndPosition(root, line);
+                        if (end < cursor) {
+                            found = new TreePath(getCurrentPath(), line);
+                        }
+                    }
+                }
+                return super.visitBlock(t, null);
+            }
+
+            @Override
+            public Void visitErroneous(ErroneousTree node, Void __) {
+                for (var t : node.getErrorTrees()) {
+                    t.accept(this, null);
+                }
+                return null;
+            }
+        }
+        var find = new FindScope();
+        find.scan(root, null);
+        var scope = trees.getScope(find.found);
+        return new Interpreter(task, scope);
     }
 
     public Optional<TreePath> find(Ptr target) {
