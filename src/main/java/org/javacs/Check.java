@@ -5,6 +5,7 @@ import com.sun.source.util.*;
 import java.util.ArrayList;
 import java.util.List;
 import javax.lang.model.element.*;
+import javax.lang.model.type.ArrayType;
 import javax.lang.model.type.ExecutableType;
 import javax.lang.model.type.TypeKind;
 import javax.lang.model.type.TypeMirror;
@@ -134,7 +135,13 @@ class Check {
     }
 
     TypeMirror check(Tree t) {
-        if (t instanceof IdentifierTree) {
+        if (t instanceof ArrayAccessTree) {
+            var access = (ArrayAccessTree) t;
+            var expr = check(access.getExpression());
+            if (!(expr instanceof ArrayType)) return empty();
+            var array = (ArrayType) expr;
+            return array.getComponentType();
+        } else if (t instanceof IdentifierTree) {
             var id = (IdentifierTree) t;
             return env(id.getName().toString());
         } else if (t instanceof MemberSelectTree) {

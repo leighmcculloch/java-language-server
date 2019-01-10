@@ -25,6 +25,12 @@ class CheckExamples {
     void callMemberMethod(CheckExamples param) {
         
     }
+
+    int[] arrayField;
+
+    void checkArrayField() {
+        
+    }
 }
 
 class HasField {
