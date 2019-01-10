@@ -21,6 +21,10 @@ class CheckExamples {
     void callMethod() {
         
     }
+
+    void callMemberMethod(CheckExamples param) {
+        
+    }
 }
 
 class HasField {

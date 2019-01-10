@@ -43,6 +43,14 @@ public class CheckTest {
         assertThat(el, hasToString("int"));
     }
 
+    @Test
+    public void callMemberMethod() {
+        var check = compile.check(26, 9);
+        var expr = parse("param.intMethod()");
+        var el = check.check(expr);
+        assertThat(el, hasToString("int"));
+    }
+
     Tree parse(String expr) {
         var file = "/org/javacs/check/Wrapper.java";
         var template = FindResource.contents(file);
