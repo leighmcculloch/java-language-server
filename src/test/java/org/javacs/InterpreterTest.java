@@ -7,7 +7,6 @@ import com.sun.source.tree.*;
 import com.sun.source.util.*;
 import java.net.URI;
 import java.util.Collections;
-import javax.lang.model.element.*;
 import org.junit.Test;
 
 public class InterpreterTest {
@@ -21,28 +20,11 @@ public class InterpreterTest {
     private final CompileFile compile = compiler.compileFile(uri);
 
     @Test
-    public void envLocalVariable() {
-        var interpreter = compile.interpreter(6, 9);
-        var el = interpreter.env("x");
-        assertThat(el.getKind(), equalTo(ElementKind.LOCAL_VARIABLE));
-        assertThat(el.asType(), hasToString("int"));
-    }
-
-    @Test
-    public void envMethodParameter() {
-        var interpreter = compile.interpreter(10, 9);
-        var el = interpreter.env("param");
-        assertThat(el.getKind(), equalTo(ElementKind.PARAMETER));
-        assertThat(el.asType(), hasToString("int"));
-    }
-
-    @Test
     public void identifier() {
         var interpreter = compile.interpreter(6, 9);
         var expr = parse("x");
         var el = interpreter.eval(expr);
-        assertThat(el.getKind(), equalTo(ElementKind.LOCAL_VARIABLE));
-        assertThat(el.asType(), hasToString("int"));
+        assertThat(el, hasToString("int"));
     }
 
     @Test
@@ -50,8 +32,7 @@ public class InterpreterTest {
         var interpreter = compile.interpreter(14, 9);
         var expr = parse("param.field");
         var el = interpreter.eval(expr);
-        assertThat(el.getKind(), equalTo(ElementKind.FIELD));
-        assertThat(el.asType(), hasToString("int"));
+        assertThat(el, hasToString("int"));
     }
 
     @Test
@@ -59,8 +40,7 @@ public class InterpreterTest {
         var interpreter = compile.interpreter(22, 9);
         var expr = parse("intMethod()");
         var el = interpreter.eval(expr);
-        assertThat(el.getKind(), equalTo(ElementKind.CLASS));
-        assertThat(el.asType(), hasToString("int"));
+        assertThat(el, hasToString("int"));
     }
 
     Tree parse(String expr) {

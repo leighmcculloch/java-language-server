@@ -328,7 +328,11 @@ class JavaLanguageServer extends LanguageServer {
 
     @Override
     public Optional<CompletionList> completion(TextDocumentPositionParams position) {
-        // TODO reuse previous compilation when changes are small
+        // TODO instead of compiling before completion, recompile the active file asynchronously.
+        // When a completion request arrives, parse (but don't compile) the current file.
+        // Get the Scope of the current expression from the most recent compilation.
+        // Use Element, TypeMirror to do a "local analyze" of the current expression.
+        // Fields are easy; overloaded method calls are going to be the trickiest part.
         var started = Instant.now();
         var uri = position.textDocument.uri;
         if (!FileStore.isJavaFile(uri)) return Optional.empty();
