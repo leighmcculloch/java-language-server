@@ -9,42 +9,42 @@ import java.net.URI;
 import java.util.Collections;
 import org.junit.Test;
 
-public class InterpreterTest {
+public class CheckTest {
     static {
         Main.setRootFormat();
     }
 
     private static final JavaCompilerService compiler =
             new JavaCompilerService(Collections.emptySet(), Collections.emptySet());
-    private final URI uri = FindResource.uri("/org/javacs/interpreter/InterpreterExamples.java");
+    private final URI uri = FindResource.uri("/org/javacs/check/CheckExamples.java");
     private final CompileFile compile = compiler.compileFile(uri);
 
     @Test
     public void identifier() {
-        var interpreter = compile.interpreter(6, 9);
+        var check = compile.check(6, 9);
         var expr = parse("x");
-        var el = interpreter.eval(expr);
+        var el = check.check(expr);
         assertThat(el, hasToString("int"));
     }
 
     @Test
     public void selectField() {
-        var interpreter = compile.interpreter(14, 9);
+        var check = compile.check(14, 9);
         var expr = parse("param.field");
-        var el = interpreter.eval(expr);
+        var el = check.check(expr);
         assertThat(el, hasToString("int"));
     }
 
     @Test
     public void callMethod() {
-        var interpreter = compile.interpreter(22, 9);
+        var check = compile.check(22, 9);
         var expr = parse("intMethod()");
-        var el = interpreter.eval(expr);
+        var el = check.check(expr);
         assertThat(el, hasToString("int"));
     }
 
     Tree parse(String expr) {
-        var file = "/org/javacs/interpreter/Wrapper.java";
+        var file = "/org/javacs/check/Wrapper.java";
         var template = FindResource.contents(file);
         var uri = FindResource.uri(file);
         template = template.replace("$EXPR", expr);

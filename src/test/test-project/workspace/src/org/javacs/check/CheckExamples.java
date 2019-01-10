@@ -1,6 +1,6 @@
 package src.org.javacs.interpreter;
 
-class InterpreterExamples {
+class CheckExamples {
     void localVar() {
         var x = 1;
         

@@ -86,7 +86,7 @@ public class CompileFile {
         return Optional.of(el);
     }
 
-    public Interpreter interpreter(int line, int character) {
+    public Check check(int line, int character) {
         var cursor = root.getLineMap().getPosition(line, character);
         var pos = trees.getSourcePositions();
         class FindScope extends TreePathScanner<Void, Void> {
@@ -134,7 +134,7 @@ public class CompileFile {
         var find = new FindScope();
         find.scan(root, null);
         var scope = trees.getScope(find.found);
-        return new Interpreter(task, scope);
+        return new Check(task, scope);
     }
 
     public Optional<TreePath> find(Ptr target) {

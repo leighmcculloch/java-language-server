@@ -12,17 +12,16 @@ import javax.lang.model.util.Elements;
 import javax.lang.model.util.Types;
 
 /**
- * Interpreter uses an existing JavacTask/Scope to evaluate simple expressions that weren't part of the original
- * compilation.
+ * Check uses an existing JavacTask/Scope to typecheck simple expressions that weren't part of the original compilation.
  */
-class Interpreter {
+class Check {
     private final JavacTask task;
     private final Scope scope;
     private final Trees trees;
     private final Elements elements;
     private final Types types;
 
-    Interpreter(JavacTask task, Scope scope) {
+    Check(JavacTask task, Scope scope) {
         this.task = task;
         this.scope = scope;
         this.trees = Trees.instance(task);
@@ -102,22 +101,22 @@ class Interpreter {
         return true;
     }
 
-    private List<TypeMirror> evalList(List<? extends ExpressionTree> ts) {
+    private List<TypeMirror> checkList(List<? extends ExpressionTree> ts) {
         var els = new ArrayList<TypeMirror>();
         for (var t : ts) {
-            var e = eval(t);
+            var e = check(t);
             els.add(e);
         }
         return els;
     }
 
-    List<ExecutableType> evalMethod(ExpressionTree t) {
+    List<ExecutableType> checkMethod(ExpressionTree t) {
         if (t instanceof IdentifierTree) {
             var id = (IdentifierTree) t;
             return envMethod(id.getName().toString());
         } else if (t instanceof MemberSelectTree) {
             var select = (MemberSelectTree) t;
-            var expr = eval(select.getExpression());
+            var expr = check(select.getExpression());
             var exprEl = types.asElement(expr);
             if (!(exprEl instanceof TypeElement)) return List.of();
             var members = elements.getAllMembers((TypeElement) exprEl);
@@ -134,13 +133,13 @@ class Interpreter {
         }
     }
 
-    TypeMirror eval(Tree t) {
+    TypeMirror check(Tree t) {
         if (t instanceof IdentifierTree) {
             var id = (IdentifierTree) t;
             return env(id.getName().toString());
         } else if (t instanceof MemberSelectTree) {
             var select = (MemberSelectTree) t;
-            var expr = eval(select.getExpression());
+            var expr = check(select.getExpression());
             var exprEl = types.asElement(expr);
             if (!(exprEl instanceof TypeElement)) return empty();
             var members = elements.getAllMembers((TypeElement) exprEl);
@@ -153,8 +152,8 @@ class Interpreter {
             return empty();
         } else if (t instanceof MethodInvocationTree) {
             var invoke = (MethodInvocationTree) t;
-            var overloads = evalMethod(invoke.getMethodSelect());
-            var args = evalList(invoke.getArguments());
+            var overloads = checkMethod(invoke.getMethodSelect());
+            var args = checkList(invoke.getArguments());
             for (var m : overloads) {
                 if (isCompatible(m, args)) {
                     return m.getReturnType();
