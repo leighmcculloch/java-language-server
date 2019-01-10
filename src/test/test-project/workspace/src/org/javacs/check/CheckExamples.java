@@ -29,6 +29,13 @@ class CheckExamples {
     int[] arrayField;
 
     void checkArrayField() {
+
+    }
+
+    void conditionalExpr() {
+        var cond = false;
+        var ifTrue = 1;
+        var ifFalse = 2;
         
     }
 }

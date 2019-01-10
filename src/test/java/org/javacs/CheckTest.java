@@ -21,7 +21,7 @@ public class CheckTest {
 
     @Test
     public void identifier() {
-        var check = compile.check(6, 9);
+        var check = compile.check(6, 1);
         var expr = parse("x");
         var type = check.check(expr);
         assertThat(type, hasToString("int"));
@@ -29,7 +29,7 @@ public class CheckTest {
 
     @Test
     public void selectField() {
-        var check = compile.check(14, 9);
+        var check = compile.check(14, 1);
         var expr = parse("param.field");
         var type = check.check(expr);
         assertThat(type, hasToString("int"));
@@ -37,7 +37,7 @@ public class CheckTest {
 
     @Test
     public void callMethod() {
-        var check = compile.check(22, 9);
+        var check = compile.check(22, 1);
         var expr = parse("intMethod()");
         var type = check.check(expr);
         assertThat(type, hasToString("int"));
@@ -45,7 +45,7 @@ public class CheckTest {
 
     @Test
     public void callMemberMethod() {
-        var check = compile.check(26, 9);
+        var check = compile.check(26, 1);
         var expr = parse("param.intMethod()");
         var type = check.check(expr);
         assertThat(type, hasToString("int"));
@@ -53,8 +53,16 @@ public class CheckTest {
 
     @Test
     public void arrayAccess() {
-        var check = compile.check(32, 9);
+        var check = compile.check(32, 1);
         var expr = parse("arrayField[0]");
+        var type = check.check(expr);
+        assertThat(type, hasToString("int"));
+    }
+
+    @Test
+    public void conditionalExpr() {
+        var check = compile.check(39, 1);
+        var expr = parse("cond ? ifTrue : ifFalse");
         var type = check.check(expr);
         assertThat(type, hasToString("int"));
     }

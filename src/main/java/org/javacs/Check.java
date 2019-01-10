@@ -141,6 +141,9 @@ class Check {
             if (!(expr instanceof ArrayType)) return empty();
             var array = (ArrayType) expr;
             return array.getComponentType();
+        } else if (t instanceof ConditionalExpressionTree) {
+            var cond = (ConditionalExpressionTree) t;
+            return check(cond.getTrueExpression());
         } else if (t instanceof IdentifierTree) {
             var id = (IdentifierTree) t;
             return env(id.getName().toString());
