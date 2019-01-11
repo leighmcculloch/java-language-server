@@ -87,6 +87,14 @@ public class CheckTest {
         return fix(find.found);
     }
 
+    @Test
+    public void paren() {
+        var check = compile.check(6, 1);
+        var expr = parse("(x)");
+        var type = check.check(expr);
+        assertThat(type, hasToString("int"));
+    }
+
     private Tree fix(Tree parsed) {
         if (parsed instanceof ExpressionStatementTree) {
             var exprStmt = (ExpressionStatementTree) parsed;

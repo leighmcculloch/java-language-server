@@ -170,6 +170,9 @@ class Check {
                 }
             }
             return empty();
+        } else if (t instanceof ParenthesizedTree) {
+            var paren = (ParenthesizedTree) t;
+            return check(paren.getExpression());
         } else {
             return empty();
         }
