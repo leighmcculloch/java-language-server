@@ -65,19 +65,21 @@ public class CompileFile {
         return new Index(task, root, parent.diags, declarations);
     }
 
-    public Optional<Element> element(int line, int character) {
-        // LOG.info(String.format("Looking for element at %s(%d,%d)...", file.getPath(), line, character));
-
-        // First, look for a tree path
+    public Optional<TreePath> path(int line, int character) {
         var path = CompileFocus.findPath(task, root, line, character);
-        if (path == null) {
+        return Optional.ofNullable(path);
+    }
+
+    public Optional<Element> element(int line, int character) {
+        // First, look for a tree path
+        var path = path(line, character);
+        if (path.isEmpty()) {
             // LOG.info("...found nothing");
             return Optional.empty();
         }
-        // LOG.info(String.format("...found tree `%s`", Parser.describeTree(path.getLeaf())));
 
         // Then, convert the path to an element
-        var el = trees.getElement(path);
+        var el = trees.getElement(path.get());
         if (el == null) {
             // LOG.info(String.format("...tree does not correspond to an element"));
             return Optional.empty();

@@ -456,7 +456,6 @@ class JavaLanguageServer extends LanguageServer {
         if (!path.isPresent()) return Optional.empty();
         // Parse the doctree associated with el
         var docTree = parse.doc(path.get());
-        ;
         var string = asMarkupContent(docTree);
         return Optional.of(string);
     }
@@ -522,6 +521,7 @@ class JavaLanguageServer extends LanguageServer {
 
     @Override
     public CompletionItem resolveCompletionItem(CompletionItem unresolved) {
+        // TODO set deprecated property
         if (unresolved.data == null) return unresolved;
         var idJson = (JsonPrimitive) unresolved.data;
         var id = idJson.getAsString();
@@ -944,7 +944,8 @@ class JavaLanguageServer extends LanguageServer {
 
     @Override
     public List<CodeLens> codeLens(CodeLensParams params) {
-        // TODO just create a blank code lens on every method, then resolve it async
+        // TODO add semantic info using createTextEditorDecorationType, setDecorations
+        // https://code.visualstudio.com/api/references/vscode-api
         var uri = params.textDocument.uri;
         if (!FileStore.isJavaFile(uri)) return List.of();
         updateCachedParse(uri);

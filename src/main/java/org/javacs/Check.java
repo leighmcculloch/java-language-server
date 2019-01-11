@@ -3,7 +3,9 @@ package org.javacs;
 import com.sun.source.tree.*;
 import com.sun.source.util.*;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import javax.lang.model.element.*;
 import javax.lang.model.type.ArrayType;
 import javax.lang.model.type.ExecutableType;
@@ -21,6 +23,7 @@ class Check {
     private final Trees trees;
     private final Elements elements;
     private final Types types;
+    private final Map<Tree, TypeMirror> context = new HashMap<>();
 
     Check(JavacTask task, Scope scope) {
         this.task = task;
@@ -28,6 +31,11 @@ class Check {
         this.trees = Trees.instance(task);
         this.elements = task.getElements();
         this.types = task.getTypes();
+    }
+
+    Check withRetainedType(Tree retainedPart, TypeMirror retainedType) {
+        context.put(retainedPart, retainedType);
+        return this;
     }
 
     private TypeMirror empty() {
@@ -111,7 +119,7 @@ class Check {
         return els;
     }
 
-    List<ExecutableType> checkMethod(ExpressionTree t) {
+    private List<ExecutableType> checkMethod(ExpressionTree t) {
         if (t instanceof IdentifierTree) {
             var id = (IdentifierTree) t;
             return envMethod(id.getName().toString());
@@ -135,7 +143,9 @@ class Check {
     }
 
     TypeMirror check(Tree t) {
-        if (t instanceof ArrayAccessTree) {
+        if (context.containsKey(t)) {
+            return context.get(t);
+        } else if (t instanceof ArrayAccessTree) {
             var access = (ArrayAccessTree) t;
             var expr = check(access.getExpression());
             if (!(expr instanceof ArrayType)) return empty();
@@ -176,5 +186,19 @@ class Check {
         } else {
             return empty();
         }
+    }
+
+    /**
+     * retainedPart(edited, line) is the part of `line` that is still in `edited`. The type of the retained part can be
+     * re-used while checking `edited`. For example, if this is `a.b.c` and edited is `a.b.x`, then
+     * this.retained(edited, _) is `a.b`. The type of `a.b` will still be the same after the user edits to `a.b.x`.
+     */
+    static TreePath retainedPart(CompilationUnitTree edited, int line) {
+        throw new RuntimeException("TODO");
+    }
+
+    /** findPart(start, end, kind) finds an expression of `kind` spanning the range `start`-`end`. */
+    static TreePath findPart(long start, long end, Tree.Kind kind) {
+        throw new RuntimeException("TODO");
     }
 }

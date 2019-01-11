@@ -50,6 +50,11 @@ public class ParseFile {
         this.root = root;
     }
 
+    public Optional<TreePath> path(int line, int character) {
+        var path = CompileFocus.findPath(task, root, line, character);
+        return Optional.ofNullable(path);
+    }
+
     public boolean isTestMethod(TreePath path) {
         var leaf = path.getLeaf();
         if (!(leaf instanceof MethodTree)) return false;

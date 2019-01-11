@@ -1,4 +1,4 @@
-package src.org.javacs.interpreter;
+package org.javacs.check;
 
 public class Wrapper {
     void wrapper() {

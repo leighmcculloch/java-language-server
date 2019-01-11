@@ -67,6 +67,30 @@ public class CheckTest {
         assertThat(type, hasToString("int"));
     }
 
+    @Test
+    public void paren() {
+        var check = compile.check(6, 1);
+        var expr = parse("(x)");
+        var type = check.check(expr);
+        assertThat(type, hasToString("int"));
+    }
+
+    @Test
+    public void anonymousClassMember() {
+        var v1 = FindResource.uri("/org/javacs/check/CheckTricky.1.java");
+        var compile = compiler.compileFile(v1);
+        // (new Object(){ int foo; int bar; })
+        var oldType = compile.element(5, 50).get().asType();
+        // (new Object(){ int foo; int bar; }).bar
+        var v2 = FindResource.uri("/org/javacs/check/CheckTricky.2.java");
+        var parse = compiler.parseFile(v2);
+        var newTree = parse.path(5, 51).get().getLeaf();
+        var check = compile.check(5, 51).withRetainedType(newTree, oldType);
+        var expr = parse.path(5, 55).get();
+        var type = check.check(expr.getLeaf());
+        assertThat(type, hasToString("int"));
+    }
+
     Tree parse(String expr) {
         var file = "/org/javacs/check/Wrapper.java";
         var template = FindResource.contents(file);
@@ -85,14 +109,6 @@ public class CheckTest {
         var find = new FindExpr();
         find.scan(parse, null);
         return fix(find.found);
-    }
-
-    @Test
-    public void paren() {
-        var check = compile.check(6, 1);
-        var expr = parse("(x)");
-        var type = check.check(expr);
-        assertThat(type, hasToString("int"));
     }
 
     private Tree fix(Tree parsed) {

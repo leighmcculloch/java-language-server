@@ -1,4 +1,4 @@
-package src.org.javacs.interpreter;
+package org.javacs.check;
 
 class CheckExamples {
     void localVar() {
