@@ -3,9 +3,8 @@ package org.javacs;
 import com.sun.source.tree.*;
 import com.sun.source.util.*;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
+import java.util.Optional;
 import javax.lang.model.element.*;
 import javax.lang.model.type.ArrayType;
 import javax.lang.model.type.ExecutableType;
@@ -23,7 +22,8 @@ class Check {
     private final Trees trees;
     private final Elements elements;
     private final Types types;
-    private final Map<Tree, TypeMirror> context = new HashMap<>();
+    private Tree.Kind retainedPart; // TODO not coloring correctly
+    private TypeMirror retainedType;
 
     Check(JavacTask task, Scope scope) {
         this.task = task;
@@ -33,8 +33,9 @@ class Check {
         this.types = task.getTypes();
     }
 
-    Check withRetainedType(Tree retainedPart, TypeMirror retainedType) {
-        context.put(retainedPart, retainedType);
+    Check withRetainedType(Tree.Kind retainedPart, TypeMirror retainedType) {
+        this.retainedPart = retainedPart;
+        this.retainedType = retainedType;
         return this;
     }
 
@@ -142,9 +143,17 @@ class Check {
         }
     }
 
+    /**
+     * Check the type of a tree without invoking the full Java compiler. Some expressions can't be checked, see
+     * cantCheck(...) for how to handle those.
+     */
     TypeMirror check(Tree t) {
-        if (context.containsKey(t)) {
-            return context.get(t);
+        if (!canCheck(t)) {
+            if (t.getKind() == retainedPart) {
+                return retainedType;
+            } else {
+                return empty();
+            }
         } else if (t instanceof ArrayAccessTree) {
             var access = (ArrayAccessTree) t;
             var expr = check(access.getExpression());
@@ -173,6 +182,7 @@ class Check {
         } else if (t instanceof MethodInvocationTree) {
             var invoke = (MethodInvocationTree) t;
             var overloads = checkMethod(invoke.getMethodSelect());
+            if (overloads.size() == 1) return overloads.get(0).getReturnType();
             var args = checkList(invoke.getArguments());
             for (var m : overloads) {
                 if (isCompatible(m, args)) {
@@ -189,16 +199,133 @@ class Check {
     }
 
     /**
-     * retainedPart(edited, line) is the part of `line` that is still in `edited`. The type of the retained part can be
-     * re-used while checking `edited`. For example, if this is `a.b.c` and edited is `a.b.x`, then
-     * this.retained(edited, _) is `a.b`. The type of `a.b` will still be the same after the user edits to `a.b.x`.
+     * cantCheck(_, root, line) finds the part of the expression to the left of the cursor that can't be checked by
+     * `check(Tree)`. If this part of the expression has previously been typechecked by javac, the previous type can be
+     * re-used by calling `withRetainedType(kind, type)`.
      */
-    static TreePath retainedPart(CompilationUnitTree edited, int line) {
-        throw new RuntimeException("TODO");
+    static Optional<TreePath> cantCheck(JavacTask task, CompilationUnitTree root, int line, int character) {
+        var path = beforeCursor(task, root, line, character);
+        return path.flatMap(Check::findCantCheck);
     }
 
-    /** findPart(start, end, kind) finds an expression of `kind` spanning the range `start`-`end`. */
-    static TreePath findPart(long start, long end, Tree.Kind kind) {
-        throw new RuntimeException("TODO");
+    private static Optional<TreePath> findCantCheck(TreePath path) {
+        var t = path.getLeaf();
+        if (!canCheck(t)) {
+            return Optional.of(path);
+        } else if (t instanceof ArrayAccessTree) {
+            var access = (ArrayAccessTree) t;
+            return findCantCheck(new TreePath(path, access.getExpression()));
+        } else if (t instanceof ConditionalExpressionTree) {
+            var cond = (ConditionalExpressionTree) t;
+            return findCantCheck(new TreePath(path, cond.getTrueExpression()));
+        } else if (t instanceof IdentifierTree) {
+            return Optional.empty();
+        } else if (t instanceof MemberSelectTree) {
+            var select = (MemberSelectTree) t;
+            return findCantCheck(new TreePath(path, select.getExpression()));
+        } else if (t instanceof MethodInvocationTree) {
+            // If any part of the method call can't be checked, then the whole method can't be checked
+            // TODO we could be more aggressive when there are no overloads
+            var invoke = (MethodInvocationTree) t;
+            if (!canCheck(invoke.getMethodSelect())) {
+                return Optional.of(path);
+            }
+            for (var arg : invoke.getArguments()) {
+                if (!canCheck(arg)) {
+                    return Optional.of(path);
+                }
+            }
+            return Optional.empty();
+        } else if (t instanceof ParenthesizedTree) {
+            var paren = (ParenthesizedTree) t;
+            return findCantCheck(new TreePath(path, paren.getExpression()));
+        } else {
+            return Optional.of(path);
+        }
+    }
+
+    private static boolean canCheck(Tree t) {
+        switch (t.getKind()) {
+            case ARRAY_ACCESS:
+            case CONDITIONAL_EXPRESSION:
+            case IDENTIFIER:
+            case MEMBER_SELECT:
+            case PARENTHESIZED:
+                return true;
+            case METHOD_INVOCATION:
+                var invoke = (MethodInvocationTree) t;
+                if (!canCheck(invoke.getMethodSelect())) return false;
+                for (var arg : invoke.getArguments()) {
+                    if (!canCheck(arg)) return false;
+                }
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    private static Optional<TreePath> beforeCursor(JavacTask task, CompilationUnitTree root, int line, int character) {
+        var pos = Trees.instance(task).getSourcePositions();
+        var lines = root.getLineMap();
+        var cursor = lines.getPosition(line, character);
+
+        // Find line
+        var findLine =
+                new TreePathScanner<Void, Void>() {
+                    TreePath found;
+
+                    boolean includesCursor(Tree t) {
+                        var start = pos.getStartPosition(root, t);
+                        var end = pos.getEndPosition(root, t);
+                        return start <= cursor && cursor <= end;
+                    }
+
+                    void check(List<? extends Tree> lines) {
+                        for (var s : lines) {
+                            if (includesCursor(s)) {
+                                found = new TreePath(getCurrentPath(), s);
+                            }
+                        }
+                    }
+
+                    @Override
+                    public Void visitClass(ClassTree t, Void __) {
+                        check(t.getMembers());
+                        return super.visitClass(t, null);
+                    }
+
+                    @Override
+                    public Void visitBlock(BlockTree t, Void __) {
+                        check(t.getStatements());
+                        return super.visitBlock(t, null);
+                    }
+                };
+        findLine.scan(root, null);
+        if (findLine.found == null) return Optional.empty();
+
+        // Find part of expression to the left of cursor
+        var findLeft =
+                new TreePathScanner<Void, Void>() {
+                    TreePath found;
+
+                    boolean beforeCursor(Tree t) {
+                        var start = pos.getStartPosition(root, t);
+                        var end = pos.getEndPosition(root, t);
+                        if (start == -1 || end == -1) return false;
+                        return start <= cursor && end <= cursor;
+                    }
+
+                    @Override
+                    public Void scan(Tree t, Void __) {
+                        if (found == null && beforeCursor(t)) {
+                            found = getCurrentPath();
+                        }
+                        return super.scan(t, null);
+                    }
+                };
+        findLeft.scan(findLine.found, null);
+        if (findLeft.found == null) return Optional.empty();
+
+        return Optional.of(findLeft.found);
     }
 }

@@ -89,6 +89,7 @@ public class CompileFile {
     }
 
     public Check check(int line, int character) {
+        // Find the scope around the cursor
         var cursor = root.getLineMap().getPosition(line, character);
         var pos = trees.getSourcePositions();
         class FindScope extends TreePathScanner<Void, Void> {
@@ -136,7 +137,17 @@ public class CompileFile {
         var find = new FindScope();
         find.scan(root, null);
         var scope = trees.getScope(find.found);
-        return new Check(task, scope);
+        var check = new Check(task, scope);
+
+        // Find the part of the line that can't be checked
+        var cantCheck = Check.cantCheck(task, root, line, character);
+        if (cantCheck.isPresent()) {
+            var oldType = trees.getTypeMirror(cantCheck.get());
+            var kind = cantCheck.get().getLeaf().getKind();
+            check.withRetainedType(kind, oldType);
+        }
+
+        return check;
     }
 
     public Optional<TreePath> find(Ptr target) {

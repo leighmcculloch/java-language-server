@@ -38,6 +38,10 @@ class CheckExamples {
         var ifFalse = 2;
         
     }
+
+    int anonymousClass() {
+        return (new Object(){ int foo; int bar; }).foo;
+    }
 }
 
 class HasField {

@@ -77,17 +77,9 @@ public class CheckTest {
 
     @Test
     public void anonymousClassMember() {
-        var v1 = FindResource.uri("/org/javacs/check/CheckTricky.1.java");
-        var compile = compiler.compileFile(v1);
-        // (new Object(){ int foo; int bar; })
-        var oldType = compile.element(5, 50).get().asType();
-        // (new Object(){ int foo; int bar; }).bar
-        var v2 = FindResource.uri("/org/javacs/check/CheckTricky.2.java");
-        var parse = compiler.parseFile(v2);
-        var newTree = parse.path(5, 51).get().getLeaf();
-        var check = compile.check(5, 51).withRetainedType(newTree, oldType);
-        var expr = parse.path(5, 55).get();
-        var type = check.check(expr.getLeaf());
+        var check = compile.check(43, 53);
+        var expr = parse("(new Object(){ int foo; int bar; }).bar");
+        var type = check.check(expr);
         assertThat(type, hasToString("int"));
     }
 
