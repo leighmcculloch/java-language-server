@@ -15,6 +15,8 @@ import java.util.logging.Logger;
 public class LSP {
     private static final Gson gson = new Gson();
 
+    private static final Thread worker = new Thread("Worker");
+
     private static String readHeader(InputStream client) {
         var line = new StringBuilder();
         for (var next = read(client); true; next = read(client)) {
@@ -193,7 +195,7 @@ public class LSP {
                         var message = parseMessage(token);
                         peek(message);
                         pending.put(message);
-                    } catch (EndOfStream __) {
+                    } catch (EndOfStream __) { // TODO __ shouldn't produce no-usages warning
                         if (kill()) return;
                     } catch (Exception e) {
                         LOG.log(Level.SEVERE, e.getMessage(), e);
@@ -217,214 +219,217 @@ public class LSP {
                 LOG.log(Level.SEVERE, e.getMessage(), e);
                 continue;
             }
+            // If poll(_) failed, loop again
+            if (r == null) continue;
             // If receive has been closed, exit
             if (r == endOfStream) {
                 LOG.warning("Stream from client has been closed, exiting...");
                 break processMessages;
             }
-            // If poll(_) failed, loop again
-            if (r == null) continue;
+            if (r.method.equals("exit")) {
+                LOG.warning("Got exit message, exiting...");
+                break processMessages;
+            }
             // Otherwise, process the new message
             try {
-                switch (r.method) {
-                    case "initialize":
-                        {
-                            var params = gson.fromJson(r.params, InitializeParams.class);
-                            var response = server.initialize(params);
-                            respond(send, r.id, response);
-                            break;
-                        }
-                    case "initialized":
-                        {
-                            server.initialized();
-                            break;
-                        }
-                    case "shutdown":
-                        {
-                            LOG.warning("Got shutdown message");
-                            break;
-                        }
-                    case "exit":
-                        {
-                            LOG.warning("Got exit message, exiting...");
-                            break processMessages;
-                        }
-                    case "workspace/didChangeWorkspaceFolders":
-                        {
-                            var params = gson.fromJson(r.params, DidChangeWorkspaceFoldersParams.class);
-                            server.didChangeWorkspaceFolders(params);
-                            break;
-                        }
-                    case "workspace/didChangeConfiguration":
-                        {
-                            var params = gson.fromJson(r.params, DidChangeConfigurationParams.class);
-                            server.didChangeConfiguration(params);
-                            break;
-                        }
-                    case "workspace/didChangeWatchedFiles":
-                        {
-                            var params = gson.fromJson(r.params, DidChangeWatchedFilesParams.class);
-                            server.didChangeWatchedFiles(params);
-                            break;
-                        }
-                    case "workspace/symbol":
-                        {
-                            var params = gson.fromJson(r.params, WorkspaceSymbolParams.class);
-                            var response = server.workspaceSymbols(params);
-                            respond(send, r.id, response);
-                            break;
-                        }
-                    case "textDocument/documentLink":
-                        {
-                            var params = gson.fromJson(r.params, DocumentLinkParams.class);
-                            var response = server.documentLink(params);
-                            respond(send, r.id, response);
-                            break;
-                        }
-                    case "textDocument/didOpen":
-                        {
-                            var params = gson.fromJson(r.params, DidOpenTextDocumentParams.class);
-                            server.didOpenTextDocument(params);
-                            break;
-                        }
-                    case "textDocument/didChange":
-                        {
-                            var params = gson.fromJson(r.params, DidChangeTextDocumentParams.class);
-                            server.didChangeTextDocument(params);
-                            break;
-                        }
-                    case "textDocument/willSave":
-                        {
-                            var params = gson.fromJson(r.params, WillSaveTextDocumentParams.class);
-                            server.willSaveTextDocument(params);
-                            break;
-                        }
-                    case "textDocument/willSaveWaitUntil":
-                        {
-                            var params = gson.fromJson(r.params, WillSaveTextDocumentParams.class);
-                            var response = server.willSaveWaitUntilTextDocument(params);
-                            respond(send, r.id, response);
-                            break;
-                        }
-                    case "textDocument/didSave":
-                        {
-                            var params = gson.fromJson(r.params, DidSaveTextDocumentParams.class);
-                            server.didSaveTextDocument(params);
-                            break;
-                        }
-                    case "textDocument/didClose":
-                        {
-                            var params = gson.fromJson(r.params, DidCloseTextDocumentParams.class);
-                            server.didCloseTextDocument(params);
-                            break;
-                        }
-                    case "textDocument/completion":
-                        {
-                            var params = gson.fromJson(r.params, TextDocumentPositionParams.class);
-                            var response = server.completion(params);
-                            respond(send, r.id, response);
-                            break;
-                        }
-                    case "completionItem/resolve":
-                        {
-                            var params = gson.fromJson(r.params, CompletionItem.class);
-                            var response = server.resolveCompletionItem(params);
-                            respond(send, r.id, response);
-                            break;
-                        }
-                    case "textDocument/hover":
-                        {
-                            var params = gson.fromJson(r.params, TextDocumentPositionParams.class);
-                            var response = server.hover(params);
-                            respond(send, r.id, response);
-                            break;
-                        }
-                    case "textDocument/signatureHelp":
-                        {
-                            var params = gson.fromJson(r.params, TextDocumentPositionParams.class);
-                            var response = server.signatureHelp(params);
-                            respond(send, r.id, response);
-                            break;
-                        }
-                    case "textDocument/definition":
-                        {
-                            var params = gson.fromJson(r.params, TextDocumentPositionParams.class);
-                            var response = server.gotoDefinition(params);
-                            respond(send, r.id, response);
-                            break;
-                        }
-                    case "textDocument/references":
-                        {
-                            var params = gson.fromJson(r.params, ReferenceParams.class);
-                            var response = server.findReferences(params);
-                            respond(send, r.id, response);
-                            break;
-                        }
-                    case "textDocument/documentSymbol":
-                        {
-                            var params = gson.fromJson(r.params, DocumentSymbolParams.class);
-                            var response = server.documentSymbol(params);
-                            respond(send, r.id, response);
-                            break;
-                        }
-                    case "textDocument/codeAction":
-                        {
-                            var params = gson.fromJson(r.params, CodeActionParams.class);
-                            var response = server.codeAction(params);
-                            respond(send, r.id, response);
-                            break;
-                        }
-                    case "textDocument/codeLens":
-                        {
-                            var params = gson.fromJson(r.params, CodeLensParams.class);
-                            var response = server.codeLens(params);
-                            respond(send, r.id, response);
-                            break;
-                        }
-                    case "codeLens/resolve":
-                        {
-                            var params = gson.fromJson(r.params, CodeLens.class);
-                            var response = server.resolveCodeLens(params);
-                            respond(send, r.id, response);
-                            break;
-                        }
-                    case "textDocument/prepareRename":
-                        {
-                            var params = gson.fromJson(r.params, TextDocumentPositionParams.class);
-                            var response = server.prepareRename(params);
-                            respond(send, r.id, response);
-                            break;
-                        }
-                    case "textDocument/rename":
-                        {
-                            var params = gson.fromJson(r.params, RenameParams.class);
-                            var response = server.rename(params);
-                            respond(send, r.id, response);
-                            break;
-                        }
-                    case "textDocument/formatting":
-                        {
-                            var params = gson.fromJson(r.params, DocumentFormattingParams.class);
-                            var response = server.formatting(params);
-                            respond(send, r.id, response);
-                            break;
-                        }
-                    case "textDocument/foldingRange":
-                        {
-                            var params = gson.fromJson(r.params, FoldingRangeParams.class);
-                            var response = server.foldingRange(params);
-                            respond(send, r.id, response);
-                            break;
-                        }
-                    default:
-                        LOG.warning(String.format("Don't know what to do with method `%s`", r.method));
-                }
+                processMessage(r, server, send);
             } catch (Exception e) {
                 LOG.log(Level.SEVERE, e.getMessage(), e);
                 if (r.id != null) {
                     respond(send, r.id, new ResponseError(ErrorCodes.InternalError, e.getMessage(), null));
                 }
             }
+        }
+    }
+
+    private static void processMessage(Message r, LanguageServer server, OutputStream send) {
+        switch (r.method) {
+            case "initialize":
+                {
+                    var params = gson.fromJson(r.params, InitializeParams.class);
+                    var response = server.initialize(params);
+                    respond(send, r.id, response);
+                    return;
+                }
+            case "initialized":
+                {
+                    server.initialized();
+                    return;
+                }
+            case "shutdown":
+                {
+                    LOG.warning("Got shutdown message");
+                    return;
+                }
+            case "workspace/didChangeWorkspaceFolders":
+                {
+                    var params = gson.fromJson(r.params, DidChangeWorkspaceFoldersParams.class);
+                    server.didChangeWorkspaceFolders(params);
+                    return;
+                }
+            case "workspace/didChangeConfiguration":
+                {
+                    var params = gson.fromJson(r.params, DidChangeConfigurationParams.class);
+                    server.didChangeConfiguration(params);
+                    return;
+                }
+            case "workspace/didChangeWatchedFiles":
+                {
+                    var params = gson.fromJson(r.params, DidChangeWatchedFilesParams.class);
+                    server.didChangeWatchedFiles(params);
+                    return;
+                }
+            case "workspace/symbol":
+                {
+                    var params = gson.fromJson(r.params, WorkspaceSymbolParams.class);
+                    var response = server.workspaceSymbols(params);
+                    respond(send, r.id, response);
+                    return;
+                }
+            case "textDocument/documentLink":
+                {
+                    var params = gson.fromJson(r.params, DocumentLinkParams.class);
+                    var response = server.documentLink(params);
+                    respond(send, r.id, response);
+                    return;
+                }
+            case "textDocument/didOpen":
+                {
+                    var params = gson.fromJson(r.params, DidOpenTextDocumentParams.class);
+                    server.didOpenTextDocument(params);
+                    return;
+                }
+            case "textDocument/didChange":
+                {
+                    var params = gson.fromJson(r.params, DidChangeTextDocumentParams.class);
+                    server.didChangeTextDocument(params);
+                    return;
+                }
+            case "textDocument/willSave":
+                {
+                    var params = gson.fromJson(r.params, WillSaveTextDocumentParams.class);
+                    server.willSaveTextDocument(params);
+                    return;
+                }
+            case "textDocument/willSaveWaitUntil":
+                {
+                    var params = gson.fromJson(r.params, WillSaveTextDocumentParams.class);
+                    var response = server.willSaveWaitUntilTextDocument(params);
+                    respond(send, r.id, response);
+                    return;
+                }
+            case "textDocument/didSave":
+                {
+                    var params = gson.fromJson(r.params, DidSaveTextDocumentParams.class);
+                    server.didSaveTextDocument(params);
+                    return;
+                }
+            case "textDocument/didClose":
+                {
+                    var params = gson.fromJson(r.params, DidCloseTextDocumentParams.class);
+                    server.didCloseTextDocument(params);
+                    return;
+                }
+            case "textDocument/completion":
+                {
+                    var params = gson.fromJson(r.params, TextDocumentPositionParams.class);
+                    var response = server.completion(params);
+                    respond(send, r.id, response);
+                    return;
+                }
+            case "completionItem/resolve":
+                {
+                    var params = gson.fromJson(r.params, CompletionItem.class);
+                    var response = server.resolveCompletionItem(params);
+                    respond(send, r.id, response);
+                    return;
+                }
+            case "textDocument/hover":
+                {
+                    var params = gson.fromJson(r.params, TextDocumentPositionParams.class);
+                    var response = server.hover(params);
+                    respond(send, r.id, response);
+                    return;
+                }
+            case "textDocument/signatureHelp":
+                {
+                    var params = gson.fromJson(r.params, TextDocumentPositionParams.class);
+                    var response = server.signatureHelp(params);
+                    respond(send, r.id, response);
+                    return;
+                }
+            case "textDocument/definition":
+                {
+                    var params = gson.fromJson(r.params, TextDocumentPositionParams.class);
+                    var response = server.gotoDefinition(params);
+                    respond(send, r.id, response);
+                    return;
+                }
+            case "textDocument/references":
+                {
+                    var params = gson.fromJson(r.params, ReferenceParams.class);
+                    var response = server.findReferences(params);
+                    respond(send, r.id, response);
+                    return;
+                }
+            case "textDocument/documentSymbol":
+                {
+                    var params = gson.fromJson(r.params, DocumentSymbolParams.class);
+                    var response = server.documentSymbol(params);
+                    respond(send, r.id, response);
+                    return;
+                }
+            case "textDocument/codeAction":
+                {
+                    var params = gson.fromJson(r.params, CodeActionParams.class);
+                    var response = server.codeAction(params);
+                    respond(send, r.id, response);
+                    return;
+                }
+            case "textDocument/codeLens":
+                {
+                    var params = gson.fromJson(r.params, CodeLensParams.class);
+                    var response = server.codeLens(params);
+                    respond(send, r.id, response);
+                    return;
+                }
+            case "codeLens/resolve":
+                {
+                    var params = gson.fromJson(r.params, CodeLens.class);
+                    var response = server.resolveCodeLens(params);
+                    respond(send, r.id, response);
+                    return;
+                }
+            case "textDocument/prepareRename":
+                {
+                    var params = gson.fromJson(r.params, TextDocumentPositionParams.class);
+                    var response = server.prepareRename(params);
+                    respond(send, r.id, response);
+                    return;
+                }
+            case "textDocument/rename":
+                {
+                    var params = gson.fromJson(r.params, RenameParams.class);
+                    var response = server.rename(params);
+                    respond(send, r.id, response);
+                    return;
+                }
+            case "textDocument/formatting":
+                {
+                    var params = gson.fromJson(r.params, DocumentFormattingParams.class);
+                    var response = server.formatting(params);
+                    respond(send, r.id, response);
+                    return;
+                }
+            case "textDocument/foldingRange":
+                {
+                    var params = gson.fromJson(r.params, FoldingRangeParams.class);
+                    var response = server.foldingRange(params);
+                    respond(send, r.id, response);
+                    return;
+                }
+            default:
+                LOG.warning(String.format("Don't know what to do with method `%s`", r.method));
         }
     }
 
