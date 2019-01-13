@@ -1,18 +1,10 @@
 package org.javacs;
 
 import com.google.gson.*;
-import com.google.gson.JsonArray;
-import com.google.gson.JsonNull;
-import com.google.gson.JsonObject;
 import com.sun.source.doctree.DocCommentTree;
 import com.sun.source.doctree.DocTree;
 import com.sun.source.doctree.ParamTree;
-import com.sun.source.tree.BlockTree;
-import com.sun.source.tree.ClassTree;
-import com.sun.source.tree.CompilationUnitTree;
-import com.sun.source.tree.MethodTree;
-import com.sun.source.tree.Tree;
-import com.sun.source.tree.VariableTree;
+import com.sun.source.tree.*;
 import com.sun.source.util.TreePath;
 import java.io.IOException;
 import java.net.URI;
@@ -20,23 +12,9 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.Duration;
 import java.time.Instant;
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Map;
-import java.util.Objects;
-import java.util.Optional;
-import java.util.Set;
-import java.util.StringJoiner;
-import java.util.UUID;
+import java.util.*;
 import java.util.logging.Logger;
-import javax.lang.model.element.Element;
-import javax.lang.model.element.ExecutableElement;
-import javax.lang.model.element.TypeElement;
-import javax.lang.model.element.VariableElement;
+import javax.lang.model.element.*;
 import javax.tools.Diagnostic;
 import javax.tools.JavaFileObject;
 import org.javacs.lsp.*;
@@ -328,22 +306,19 @@ class JavaLanguageServer extends LanguageServer {
 
     @Override
     public Optional<CompletionList> completion(TextDocumentPositionParams position) {
-        // TODO instead of compiling before completion, recompile the active file asynchronously.
-        // When a completion request arrives, parse (but don't compile) the current file.
-        // Get the Scope of the current expression from the most recent compilation.
-        // Use Element, TypeMirror to do a "local analyze" of the current expression.
-        // Fields are easy; overloaded method calls are going to be the trickiest part.
         var started = Instant.now();
-        var uri = position.textDocument.uri;
-        if (!FileStore.isJavaFile(uri)) return Optional.empty();
+
+        // Recompile the active file periodically as the user types
+        updateActiveFileAsync(position.textDocument.uri);
+
+        // Parse the most recent version of the file and find the user's cursor
         var line = position.position.line + 1;
-        var column = position.position.character + 1;
-        // Figure out what kind of completion we want to do
-        var maybeCtx = compiler.parseFile(uri).completionContext(line, column);
+        var character = position.position.character + 1;
+        var cursor = compiler.parseFile(position.textDocument.uri).path(line, character);
         // TODO don't complete inside of comments
-        if (!maybeCtx.isPresent()) {
+        if (!cursor.isPresent()) {
             var items = new ArrayList<CompletionItem>();
-            for (var name : CompileFocus.TOP_LEVEL_KEYWORDS) {
+            for (var name : Check.TOP_LEVEL_KEYWORDS) {
                 var i = new CompletionItem();
                 i.label = name;
                 i.kind = CompletionItemKind.Keyword;
@@ -352,38 +327,38 @@ class JavaLanguageServer extends LanguageServer {
             }
             return Optional.of(new CompletionList(true, items));
         }
-        // Compile again, focusing on a region that depends on what type of completion we want to do
-        var ctx = maybeCtx.get();
-        // TODO CompileFocus should have a "patch" mechanism where we recompile the current file without creating a new
-        // task
-        var focus = compiler.compileFocus(uri, ctx.line, ctx.character);
-        // Do a specific type of completion
+
+        // Use a (possibly slightly stale) compilation of the active file to typecheck the expression under the cursor
+        var check = activeFileCache.check(line, character);
+
+        // How we complete will depend on the kind of expression under the cursor
         List<Completion> cs;
         boolean isIncomplete;
-        switch (ctx.kind) {
-            case MemberSelect:
-                cs = focus.completeMembers(false);
-                isIncomplete = false;
-                break;
-            case MemberReference:
-                cs = focus.completeMembers(true);
-                isIncomplete = false;
-                break;
-            case Identifier:
-                cs = focus.completeIdentifiers(ctx.inClass, ctx.inMethod, ctx.partialName);
+        switch (cursor.get().getLeaf().getKind()) {
+            case IDENTIFIER:
+                cs = check.completeIdentifiers(cursor.get());
                 isIncomplete = cs.size() >= CompileFocus.MAX_COMPLETION_ITEMS;
                 break;
-            case Annotation:
-                cs = focus.completeAnnotations(ctx.partialName);
+            case MEMBER_SELECT:
+                cs = check.completeMembers(cursor.get(), false);
+                isIncomplete = false;
+                break;
+            case MEMBER_REFERENCE:
+                cs = check.completeMembers(cursor.get(), true);
+                isIncomplete = false;
+                break;
+            case ANNOTATION_TYPE:
+                cs = check.completeAnnotations(cursor.get());
                 isIncomplete = cs.size() >= CompileFocus.MAX_COMPLETION_ITEMS;
                 break;
-            case Case:
-                cs = focus.completeCases();
+            case CASE:
+                cs = check.completeCases(cursor.get());
                 isIncomplete = false;
                 break;
             default:
-                throw new RuntimeException("Unexpected completion context " + ctx.kind);
+                return Optional.empty();
         }
+
         // Convert to CompletionItem
         var result = new ArrayList<CompletionItem>();
         for (var c : cs) {
@@ -621,7 +596,6 @@ class JavaLanguageServer extends LanguageServer {
     private CompileFile activeFileCache;
     private int activeFileCacheVersion = -1;
 
-    // TODO take only URI and invalidate based on version
     private void updateActiveFile(URI uri) {
         if (activeFileCache == null
                 || !activeFileCache.file.equals(uri)
@@ -629,6 +603,21 @@ class JavaLanguageServer extends LanguageServer {
             LOG.info("Recompile active file...");
             activeFileCache = compiler.compileFile(uri);
             activeFileCacheVersion = FileStore.version(uri);
+        }
+    }
+
+    private void updateActiveFileAsync(URI uri) {
+        if (activeFileCache == null || !activeFileCache.file.equals(uri)) {
+            LOG.info("Recompile active file...");
+            activeFileCache = compiler.compileFile(uri);
+            activeFileCacheVersion = FileStore.version(uri);
+        } else if (activeFileCacheVersion != FileStore.version(uri)) {
+            LSP.async(
+                    () -> {
+                        LOG.info("Recompile active file...");
+                        activeFileCache = compiler.compileFile(uri);
+                        activeFileCacheVersion = FileStore.version(uri);
+                    });
         }
     }
 
