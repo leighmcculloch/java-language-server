@@ -7,6 +7,8 @@ import java.nio.charset.Charset;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 import java.util.logging.Level;
@@ -15,7 +17,20 @@ import java.util.logging.Logger;
 public class LSP {
     private static final Gson gson = new Gson();
 
-    private static final Thread worker = new Thread("Worker");
+    private static final ExecutorService worker =
+            Executors.newSingleThreadExecutor(runnable -> new Thread(runnable, "Worker"));
+
+    /** Run a task asynchronously on the same thread that's used to process messages */
+    public static void async(Runnable task) {
+        worker.submit(
+                () -> {
+                    try {
+                        task.run();
+                    } catch (Exception e) {
+                        LOG.log(Level.SEVERE, "Error during async task", e);
+                    }
+                });
+    }
 
     private static String readHeader(InputStream client) {
         var line = new StringBuilder();
@@ -231,6 +246,13 @@ public class LSP {
                 break processMessages;
             }
             // Otherwise, process the new message
+            var task = processMessageTask(r, server, send);
+            worker.submit(task);
+        }
+    }
+
+    private static Runnable processMessageTask(Message r, LanguageServer server, OutputStream send) {
+        return () -> {
             try {
                 processMessage(r, server, send);
             } catch (Exception e) {
@@ -239,7 +261,7 @@ public class LSP {
                     respond(send, r.id, new ResponseError(ErrorCodes.InternalError, e.getMessage(), null));
                 }
             }
-        }
+        };
     }
 
     private static void processMessage(Message r, LanguageServer server, OutputStream send) {
