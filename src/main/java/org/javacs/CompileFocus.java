@@ -10,7 +10,6 @@ import javax.lang.model.element.*;
 import javax.lang.model.util.Types;
 
 public class CompileFocus {
-    public static final int MAX_COMPLETION_ITEMS = 50;
 
     private final JavaCompilerService parent;
     private final URI file;

@@ -90,8 +90,26 @@ public class CompileFile {
 
     public Check check(int line, int character) {
         // Find the scope around the cursor
-        var cursor = root.getLineMap().getPosition(line, character);
+        var scopePath = cursorScope(line, character).orElse(new TreePath(root));
+        var scope = trees.getScope(scopePath);
+        var check = new Check(parent, task, scope);
+
+        // Find the part of the line that can't be checked
+        var cursor = beforeCursor(line, character);
+        var cantCheck = cursor.flatMap(Check::cantCheck);
+        if (cantCheck.isPresent()) {
+            var oldType = trees.getTypeMirror(cantCheck.get());
+            var kind = cantCheck.get().getLeaf().getKind();
+            check.withRetainedType(kind, oldType);
+        }
+
+        return check;
+    }
+
+    private Optional<TreePath> cursorScope(int line, int character) {
         var pos = trees.getSourcePositions();
+        var lines = root.getLineMap();
+        var cursor = lines.getPosition(line, character);
         class FindScope extends TreePathScanner<Void, Void> {
             TreePath found;
 
@@ -129,25 +147,98 @@ public class CompileFile {
             @Override
             public Void visitErroneous(ErroneousTree node, Void __) {
                 for (var t : node.getErrorTrees()) {
-                    t.accept(this, null);
+                    scan(t, null);
                 }
                 return null;
             }
         }
         var find = new FindScope();
         find.scan(root, null);
-        var scope = trees.getScope(find.found);
-        var check = new Check(task, scope);
+        return Optional.ofNullable(find.found);
+    }
 
-        // Find the part of the line that can't be checked
-        var cantCheck = Check.cantCheck(task, root, line, character);
-        if (cantCheck.isPresent()) {
-            var oldType = trees.getTypeMirror(cantCheck.get());
-            var kind = cantCheck.get().getLeaf().getKind();
-            check.withRetainedType(kind, oldType);
-        }
+    private Optional<TreePath> beforeCursor(int line, int character) {
+        var pos = trees.getSourcePositions();
+        var lines = root.getLineMap();
+        var cursor = lines.getPosition(line, character);
 
-        return check;
+        // Find line
+        var findLine =
+                new TreePathScanner<Void, Void>() {
+                    TreePath found;
+
+                    boolean includesCursor(Tree t) {
+                        var start = pos.getStartPosition(root, t);
+                        var end = pos.getEndPosition(root, t);
+                        return start <= cursor && cursor <= end;
+                    }
+
+                    @Override
+                    public Void visitClass(ClassTree t, Void __) {
+                        for (var m : t.getMembers()) {
+                            if (m instanceof VariableTree) {
+                                var field = (VariableTree) m;
+                                if (includesCursor(field.getInitializer())) {
+                                    var fieldPath = new TreePath(getCurrentPath(), field);
+                                    found = new TreePath(fieldPath, field.getInitializer());
+                                }
+                            }
+                        }
+                        return super.visitClass(t, null);
+                    }
+
+                    @Override
+                    public Void visitBlock(BlockTree t, Void __) {
+                        for (var s : t.getStatements()) {
+                            if (includesCursor(s)) {
+                                found = new TreePath(getCurrentPath(), s);
+                            }
+                        }
+                        return super.visitBlock(t, null);
+                    }
+
+                    @Override
+                    public Void visitErroneous(ErroneousTree node, Void __) {
+                        for (var t : node.getErrorTrees()) {
+                            scan(t, null);
+                        }
+                        return null;
+                    }
+                };
+        findLine.scan(root, null);
+        if (findLine.found == null) return Optional.empty();
+
+        // Find part of expression to the left of cursor
+        var findLeft =
+                new TreePathScanner<Void, Void>() {
+                    TreePath found;
+
+                    boolean beforeCursor(Tree t) {
+                        var start = pos.getStartPosition(root, t);
+                        var end = pos.getEndPosition(root, t);
+                        if (start == -1 || end == -1) return false;
+                        return start <= cursor && end <= cursor;
+                    }
+
+                    @Override
+                    public Void scan(Tree t, Void __) {
+                        if (found == null && t.getKind() != Tree.Kind.ERRONEOUS && beforeCursor(t)) {
+                            found = new TreePath(getCurrentPath(), t);
+                        }
+                        return super.scan(t, null);
+                    }
+
+                    @Override
+                    public Void visitErroneous(ErroneousTree node, Void __) {
+                        for (var t : node.getErrorTrees()) {
+                            scan(t, null);
+                        }
+                        return null;
+                    }
+                };
+        findLeft.scan(findLine.found, null);
+
+        return Optional.ofNullable(findLeft.found);
     }
 
     public Optional<TreePath> find(Ptr target) {
@@ -172,20 +263,20 @@ public class CompileFile {
             }
 
             @Override
-            public Void visitClass(ClassTree node, Void aVoid) {
+            public Void visitClass(ClassTree node, Void __) {
                 check();
-                return super.visitClass(node, aVoid);
+                return super.visitClass(node, __);
             }
 
             @Override
-            public Void visitMethod(MethodTree node, Void aVoid) {
+            public Void visitMethod(MethodTree node, Void __) {
                 check();
                 // Ptr can't point inside a method
                 return null;
             }
 
             @Override
-            public Void visitVariable(VariableTree node, Void aVoid) {
+            public Void visitVariable(VariableTree node, Void __) {
                 check();
                 // Ptr can't point inside a method
                 return null;

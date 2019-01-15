@@ -3,7 +3,6 @@ package org.javacs;
 import com.sun.source.tree.*;
 import com.sun.source.util.*;
 import java.io.IOException;
-import java.net.URI;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
@@ -21,7 +20,6 @@ import javax.lang.model.element.*;
 import javax.lang.model.type.ArrayType;
 import javax.lang.model.type.DeclaredType;
 import javax.lang.model.type.ExecutableType;
-import javax.lang.model.type.TypeKind;
 import javax.lang.model.type.TypeMirror;
 import javax.lang.model.util.Elements;
 import javax.lang.model.util.Types;
@@ -32,6 +30,9 @@ import javax.tools.StandardLocation;
  * Check uses an existing JavacTask/Scope to typecheck simple expressions that weren't part of the original compilation.
  */
 class Check {
+    public static final int MAX_COMPLETION_ITEMS = 50;
+
+    private final JavaCompilerService parent;
     private final JavacTask task;
     private final Scope scope;
     private final Trees trees;
@@ -40,7 +41,8 @@ class Check {
     private Tree.Kind retainedPart; // TODO not coloring correctly
     private TypeMirror retainedType;
 
-    Check(JavacTask task, Scope scope) {
+    Check(JavaCompilerService parent, JavacTask task, Scope scope) {
+        this.parent = parent;
         this.task = task;
         this.scope = scope;
         this.trees = Trees.instance(task);
@@ -54,66 +56,84 @@ class Check {
         return this;
     }
 
-    private TypeMirror empty() {
-        return elements.getTypeElement("java.lang.Void").asType();
+    private TypeElement empty() {
+        return elements.getTypeElement("java.lang.Void");
     }
 
     private boolean isThisOrSuper(Name name) {
         return name.contentEquals("this") || name.contentEquals("super");
     }
 
-    private List<TypeMirror> thisMembers(Element thisOrSuper, String identifier) {
-        var list = new ArrayList<TypeMirror>();
+    private List<Element> thisMembers(Element thisOrSuper, String identifier) {
+        var list = new ArrayList<Element>();
         var thisType = thisOrSuper.asType();
         var thisEl = types.asElement(thisType);
         if (thisEl instanceof TypeElement) {
             var thisTypeEl = (TypeElement) thisEl;
             for (var m : elements.getAllMembers(thisTypeEl)) {
                 if (m.getSimpleName().contentEquals(identifier)) {
-                    list.add(m.asType());
+                    list.add(m);
                 }
             }
         }
         return list;
     }
 
-    private List<TypeMirror> members(Scope scope, String identifier) {
-        var list = new ArrayList<TypeMirror>();
-        for (var el : scope.getLocalElements()) {
-            if (el.getSimpleName().contentEquals(identifier)) {
-                list.add(el.asType());
-            }
-            if (isThisOrSuper(el.getSimpleName())) {
-                list.addAll(thisMembers(el, identifier));
-            }
-        }
-        return list;
-    }
+    private List<Element> env(String identifier) {
+        var matches = new ArrayList<Element>();
 
-    private List<ExecutableType> envMethod(String identifier) {
-        // TODO outermost scopes take forever to resolve, skip them like in CompileFocus?
-        var matches = new ArrayList<ExecutableType>();
+        // Collect elements from all scopes
+        // This includes explicit imports and star-imports
         for (var s = scope; s != null; s = s.getEnclosingScope()) {
-            for (var el : members(s, identifier)) {
-                if (el.getKind() == TypeKind.EXECUTABLE) {
-                    matches.add((ExecutableType) el);
+            for (var el : s.getLocalElements()) {
+                var candidate = el.getSimpleName();
+                if (candidate.contentEquals(identifier)) {
+                    matches.add(el);
                 }
+                if (isThisOrSuper(el.getSimpleName())) {
+                    matches.addAll(thisMembers(el, identifier));
+                }
+            }
+        }
+
+        // Collect implicitly imported classes from the same package
+        var pkg = elements.getPackageOf(scope.getEnclosingClass());
+        var packageClasses = pkg.getEnclosedElements();
+        for (var cls : packageClasses) {
+            if (cls.getSimpleName().contentEquals(identifier)) {
+                matches.add(cls);
+            }
+        }
+
+        return matches;
+    }
+
+    private List<ExecutableElement> envMethod(String identifier) {
+        // TODO outermost scopes take forever to resolve, skip them like in CompileFocus?
+        var matches = new ArrayList<ExecutableElement>();
+        for (var el : env(identifier)) {
+            if (el.getKind() == ElementKind.METHOD) {
+                matches.add((ExecutableElement) el);
             }
         }
         return matches;
     }
 
-    private TypeMirror env(String identifier) {
+    private Element envVar(String identifier) {
         // TODO outermost scopes take forever to resolve, skip them like in CompileFocus?
-        for (var s = scope; s != null; s = s.getEnclosingScope()) {
-            for (var el : members(s, identifier)) {
-                if (el.getKind() != TypeKind.EXECUTABLE) {
-                    return el;
-                }
+        for (var el : env(identifier)) {
+            if (el.getKind() != ElementKind.METHOD) {
+                return el;
             }
         }
         return empty();
     }
+
+    /**
+     * Convert an ambiguous name like a.b.c to an Element according to
+     * https://docs.oracle.com/javase/specs/jls/se11/html/jls-6.html#jls-6.5.2
+     */
+    private Element resolveAmbiguousName(MemberSelectTree select) {}
 
     private boolean isCompatible(ExecutableType method, List<TypeMirror> args) {
         var params = method.getParameterTypes();
@@ -138,8 +158,15 @@ class Check {
     private List<ExecutableType> checkMethod(ExpressionTree t) {
         if (t instanceof IdentifierTree) {
             var id = (IdentifierTree) t;
-            return envMethod(id.getName().toString());
+            var name = id.getName().toString();
+            var methods = envMethod(name);
+            var types = new ArrayList<ExecutableType>();
+            for (var m : methods) {
+                types.add((ExecutableType) m.asType());
+            }
+            return types;
         } else if (t instanceof MemberSelectTree) {
+            // TODO resolve ambiguous names
             var select = (MemberSelectTree) t;
             var expr = check(select.getExpression());
             var exprEl = types.asElement(expr);
@@ -167,12 +194,12 @@ class Check {
             if (t.getKind() == retainedPart) {
                 return retainedType;
             } else {
-                return empty();
+                return empty().asType();
             }
         } else if (t instanceof ArrayAccessTree) {
             var access = (ArrayAccessTree) t;
             var expr = check(access.getExpression());
-            if (!(expr instanceof ArrayType)) return empty();
+            if (!(expr instanceof ArrayType)) return empty().asType();
             var array = (ArrayType) expr;
             return array.getComponentType();
         } else if (t instanceof ConditionalExpressionTree) {
@@ -180,12 +207,13 @@ class Check {
             return check(cond.getTrueExpression());
         } else if (t instanceof IdentifierTree) {
             var id = (IdentifierTree) t;
-            return env(id.getName().toString());
+            return envVar(id.getName().toString()).asType();
         } else if (t instanceof MemberSelectTree) {
+            // TODO resolve ambiguous names
             var select = (MemberSelectTree) t;
             var expr = check(select.getExpression());
             var exprEl = types.asElement(expr);
-            if (!(exprEl instanceof TypeElement)) return empty();
+            if (!(exprEl instanceof TypeElement)) return empty().asType();
             var members = elements.getAllMembers((TypeElement) exprEl);
             var name = select.getIdentifier();
             for (var m : members) {
@@ -193,7 +221,7 @@ class Check {
                     return m.asType();
                 }
             }
-            return empty();
+            return empty().asType();
         } else if (t instanceof MethodInvocationTree) {
             var invoke = (MethodInvocationTree) t;
             var overloads = checkMethod(invoke.getMethodSelect());
@@ -204,58 +232,53 @@ class Check {
                     return m.getReturnType();
                 }
             }
-            return empty();
+            return empty().asType();
         } else if (t instanceof ParenthesizedTree) {
             var paren = (ParenthesizedTree) t;
             return check(paren.getExpression());
         } else {
-            return empty();
+            return empty().asType();
         }
     }
 
     /**
-     * cantCheck(_, root, line) finds the part of the expression to the left of the cursor that can't be checked by
-     * `check(Tree)`. If this part of the expression has previously been typechecked by javac, the previous type can be
-     * re-used by calling `withRetainedType(kind, type)`.
+     * cantCheck(cursor) finds the part of the expression under the cursor that can't be checked by `check(Tree)`. If
+     * this part of the expression has previously been typechecked by javac, the previous type can be re-used by calling
+     * `withRetainedType(kind, type)`.
      */
-    static Optional<TreePath> cantCheck(JavacTask task, CompilationUnitTree root, int line, int character) {
-        var path = beforeCursor(task, root, line, character);
-        return path.flatMap(Check::findCantCheck);
-    }
-
-    private static Optional<TreePath> findCantCheck(TreePath path) {
-        var t = path.getLeaf();
+    static Optional<TreePath> cantCheck(TreePath cursor) {
+        var t = cursor.getLeaf();
         if (!canCheck(t)) {
-            return Optional.of(path);
+            return Optional.of(cursor);
         } else if (t instanceof ArrayAccessTree) {
             var access = (ArrayAccessTree) t;
-            return findCantCheck(new TreePath(path, access.getExpression()));
+            return cantCheck(new TreePath(cursor, access.getExpression()));
         } else if (t instanceof ConditionalExpressionTree) {
             var cond = (ConditionalExpressionTree) t;
-            return findCantCheck(new TreePath(path, cond.getTrueExpression()));
+            return cantCheck(new TreePath(cursor, cond.getTrueExpression()));
         } else if (t instanceof IdentifierTree) {
             return Optional.empty();
         } else if (t instanceof MemberSelectTree) {
             var select = (MemberSelectTree) t;
-            return findCantCheck(new TreePath(path, select.getExpression()));
+            return cantCheck(new TreePath(cursor, select.getExpression()));
         } else if (t instanceof MethodInvocationTree) {
             // If any part of the method call can't be checked, then the whole method can't be checked
             // TODO we could be more aggressive when there are no overloads
             var invoke = (MethodInvocationTree) t;
             if (!canCheck(invoke.getMethodSelect())) {
-                return Optional.of(path);
+                return Optional.of(cursor);
             }
             for (var arg : invoke.getArguments()) {
                 if (!canCheck(arg)) {
-                    return Optional.of(path);
+                    return Optional.of(cursor);
                 }
             }
             return Optional.empty();
         } else if (t instanceof ParenthesizedTree) {
             var paren = (ParenthesizedTree) t;
-            return findCantCheck(new TreePath(path, paren.getExpression()));
+            return cantCheck(new TreePath(cursor, paren.getExpression()));
         } else {
-            return Optional.of(path);
+            return Optional.of(cursor);
         }
     }
 
@@ -279,71 +302,6 @@ class Check {
         }
     }
 
-    private static Optional<TreePath> beforeCursor(JavacTask task, CompilationUnitTree root, int line, int character) {
-        var pos = Trees.instance(task).getSourcePositions();
-        var lines = root.getLineMap();
-        var cursor = lines.getPosition(line, character);
-
-        // Find line
-        var findLine =
-                new TreePathScanner<Void, Void>() {
-                    TreePath found;
-
-                    boolean includesCursor(Tree t) {
-                        var start = pos.getStartPosition(root, t);
-                        var end = pos.getEndPosition(root, t);
-                        return start <= cursor && cursor <= end;
-                    }
-
-                    void check(List<? extends Tree> lines) {
-                        for (var s : lines) {
-                            if (includesCursor(s)) {
-                                found = new TreePath(getCurrentPath(), s);
-                            }
-                        }
-                    }
-
-                    @Override
-                    public Void visitClass(ClassTree t, Void __) {
-                        check(t.getMembers());
-                        return super.visitClass(t, null);
-                    }
-
-                    @Override
-                    public Void visitBlock(BlockTree t, Void __) {
-                        check(t.getStatements());
-                        return super.visitBlock(t, null);
-                    }
-                };
-        findLine.scan(root, null);
-        if (findLine.found == null) return Optional.empty();
-
-        // Find part of expression to the left of cursor
-        var findLeft =
-                new TreePathScanner<Void, Void>() {
-                    TreePath found;
-
-                    boolean beforeCursor(Tree t) {
-                        var start = pos.getStartPosition(root, t);
-                        var end = pos.getEndPosition(root, t);
-                        if (start == -1 || end == -1) return false;
-                        return start <= cursor && end <= cursor;
-                    }
-
-                    @Override
-                    public Void scan(Tree t, Void __) {
-                        if (found == null && beforeCursor(t)) {
-                            found = getCurrentPath();
-                        }
-                        return super.scan(t, null);
-                    }
-                };
-        findLeft.scan(findLine.found, null);
-        if (findLeft.found == null) return Optional.empty();
-
-        return Optional.of(findLeft.found);
-    }
-
     public List<Completion> completeIdentifiers(TreePath cursor) {
         var id = (IdentifierTree) cursor.getLeaf();
         var partialName = id.getName().toString();
@@ -354,26 +312,28 @@ class Check {
 
         // Add snippets
         if (!insideClass(cursor)) {
+            var uri = cursor.getCompilationUnit().getSourceFile().toUri();
+            var file = Paths.get(uri);
             // If no package declaration is present, suggest package [inferred name];
             if (cursor.getCompilationUnit().getPackage() == null) {
-                var name = FileStore.suggestedPackageName(Paths.get(file));
+                var name = FileStore.suggestedPackageName(file);
                 result.add(Completion.ofSnippet("package " + name, "package " + name + ";\n\n"));
             }
             // If no class declaration is present, suggest class [file name]
             var hasClassDeclaration = false;
-            for (var t : root.getTypeDecls()) {
+            for (var t : cursor.getCompilationUnit().getTypeDecls()) {
                 if (!(t instanceof ErroneousTree)) {
                     hasClassDeclaration = true;
                 }
             }
             if (!hasClassDeclaration) {
-                var name = Paths.get(file).getFileName().toString();
+                var name = file.getFileName().toString();
                 name = name.substring(0, name.length() - ".java".length());
                 result.add(Completion.ofSnippet("class " + name, "class " + name + " {\n    $0\n}"));
             }
         }
         // Add identifiers
-        completeScopeIdentifiers(partialName, result);
+        completeScopeIdentifiers(cursor.getCompilationUnit(), partialName, result);
         // Add keywords
         if (!insideClass(cursor)) {
             addKeywords(TOP_LEVEL_KEYWORDS, partialName, result);
@@ -428,7 +388,7 @@ class Check {
             }
         }
         // Add @Override, @Test, other simple class names
-        completeScopeIdentifiers(partialName, result);
+        completeScopeIdentifiers(cursor.getCompilationUnit(), partialName, result);
         return result;
     }
 
@@ -461,124 +421,171 @@ class Check {
         return result;
     }
 
-    /** Find all members of expression ending at line:character */
-    public List<Completion> completeMembers(TreePath cursor, boolean isReference) {
-        var types = task.getTypes();
-        var scope = trees.getScope(path);
-        var element = trees.getElement(path);
+    /** Is cursor pointing to a static member, for example MyClass.myField? */
+    public boolean isStaticMember(TreePath cursor) {
+        var select = (MemberSelectTree) cursor.getLeaf();
+        return asTypeName(select.getExpression()).isPresent();
+    }
 
-        if (element instanceof PackageElement) {
-            var result = new ArrayList<Completion>();
-            var p = (PackageElement) element;
+    /** Is cursor pointing to a static reference, for example MyClass::myMethod? */
+    public boolean isStaticReference(TreePath cursor) {
+        var select = (MemberReferenceTree) cursor.getLeaf();
+        return asTypeName(select.getQualifierExpression()).isPresent();
+    }
 
-            LOG.info(String.format("...completing members of package %s", p.getQualifiedName()));
-
-            // Add class-names resolved as Element by javac
-            for (var member : p.getEnclosedElements()) {
-                // If the package member is a TypeElement, like a class or interface, check if it's accessible
-                if (member instanceof TypeElement) {
-                    if (trees.isAccessible(scope, (TypeElement) member)) {
-                        result.add(Completion.ofElement(member));
-                    }
-                }
-                // Otherwise, just assume it's accessible and add it to the list
-                else result.add(Completion.ofElement(member));
-            }
-            // Add sub-package names resolved as String by guava ClassPath
-            var parent = p.getQualifiedName().toString();
-            var subs = subPackages(parent);
-            for (var sub : subs) {
-                result.add(Completion.ofPackagePart(sub, Parser.lastName(sub)));
-            }
-
-            return result;
-        } else if (element instanceof TypeElement && isReference) {
-            var result = new ArrayList<Completion>();
-            var t = (TypeElement) element;
-
-            LOG.info(String.format("...completing static methods of %s", t.getQualifiedName()));
-
-            // Add members
-            for (var member : t.getEnclosedElements()) {
-                if (member.getKind() == ElementKind.METHOD
-                        && trees.isAccessible(scope, member, (DeclaredType) t.asType())) {
-                    result.add(Completion.ofElement(member));
+    private Optional<TypeElement> asTypeName(Tree t) {
+        if (t instanceof IdentifierTree) {
+            var id = (IdentifierTree) t;
+            var el = envVar(id.getName().toString());
+            if (!(el instanceof TypeElement)) return Optional.empty();
+            return Optional.of((TypeElement) el);
+        } else if (t instanceof MemberSelectTree) {
+            var select = (MemberSelectTree) t;
+            var expr = asTypeName(select.getExpression());
+            if (expr.isEmpty()) return Optional.empty();
+            var members = elements.getAllMembers(expr.get());
+            var name = select.getIdentifier();
+            for (var m : members) {
+                if (m.getSimpleName().contentEquals(name) && m instanceof TypeElement) {
+                    return Optional.of((TypeElement) m);
                 }
             }
-
-            // Add ::new
-            result.add(Completion.ofKeyword("new"));
-
-            return result;
-        } else if (element instanceof TypeElement && !isReference) {
-            var result = new ArrayList<Completion>();
-            var t = (TypeElement) element;
-
-            LOG.info(String.format("...completing static members of %s", t.getQualifiedName()));
-
-            // Add static members
-            for (var member : t.getEnclosedElements()) {
-                // TODO if this is a member reference :: then include non-statics
-                if (member.getModifiers().contains(Modifier.STATIC)
-                        && trees.isAccessible(scope, member, (DeclaredType) t.asType())) {
-                    result.add(Completion.ofElement(member));
-                }
-            }
-
-            // Add .class
-            result.add(Completion.ofKeyword("class"));
-            result.add(Completion.ofKeyword("this"));
-            result.add(Completion.ofKeyword("super"));
-
-            return result;
+            return Optional.empty();
         } else {
-            var type = trees.getTypeMirror(path);
-            if (type == null) {
-                LOG.warning(String.format("`...%s` has not type", path.getLeaf()));
-                return List.of();
-            }
-            if (!hasMembers(type)) {
-                LOG.warning("...don't know how to complete members of type " + type);
-                return Collections.emptyList();
-            }
+            return Optional.empty();
+        }
+    }
 
-            var result = new ArrayList<Completion>();
-            var ts = supersWithSelf(type);
-            var alreadyAdded = new HashSet<String>();
-            LOG.info(String.format("...completing virtual members of %s and %d supers", type, ts.size()));
-            for (var t : ts) {
-                var e = types.asElement(t);
-                if (e == null) {
-                    LOG.warning(String.format("...can't convert supertype `%s` to element, skipping", t));
-                    continue;
+    public List<Completion> completePackageMember(TreePath cursor) {
+        var select = (MemberSelectTree) cursor.getLeaf();
+        var type = check(select.getExpression());
+        var p = (TypeElement) types.asElement(type);
+        var result = new ArrayList<Completion>();
+
+        LOG.info(String.format("...completing members of package %s", p));
+
+        // Add class-names resolved as Element by javac
+        for (var member : p.getEnclosedElements()) {
+            // If the package member is a TypeElement, like a class or interface, check if it's accessible
+            if (member instanceof TypeElement) {
+                if (trees.isAccessible(scope, (TypeElement) member)) {
+                    result.add(Completion.ofElement(member));
                 }
-                for (var member : e.getEnclosedElements()) {
-                    // Don't add statics
-                    if (member.getModifiers().contains(Modifier.STATIC)) continue;
-                    // Don't add constructors
-                    if (member.getSimpleName().contentEquals("<init>")) continue;
-                    // Skip overridden members from superclass
-                    if (alreadyAdded.contains(member.toString())) continue;
+            }
+            // Otherwise, just assume it's accessible and add it to the list
+            else result.add(Completion.ofElement(member));
+        }
+        // Add sub-package names resolved as String by guava ClassPath
+        var parent = p.getQualifiedName().toString();
+        var subs = subPackages(parent);
+        for (var sub : subs) {
+            result.add(Completion.ofPackagePart(sub, Parser.lastName(sub)));
+        }
 
-                    // If type is a DeclaredType, check accessibility of member
-                    if (type instanceof DeclaredType) {
-                        if (trees.isAccessible(scope, member, (DeclaredType) type)) {
-                            result.add(Completion.ofElement(member));
-                            alreadyAdded.add(member.toString());
-                        }
-                    }
-                    // Otherwise, accessibility rules are very complicated
-                    // Give up and just declare that everything is accessible
-                    else {
+        return result;
+    }
+
+    public List<Completion> completeMethodReference(TreePath cursor) {
+        var select = (MemberReferenceTree) cursor.getLeaf();
+        var type = check(select.getQualifierExpression());
+        var t = (TypeElement) types.asElement(type);
+        var result = new ArrayList<Completion>();
+
+        LOG.info(String.format("...completing static methods of %s", t.getQualifiedName()));
+
+        // Add members
+        for (var member : t.getEnclosedElements()) {
+            if (member.getKind() == ElementKind.METHOD
+                    && trees.isAccessible(scope, member, (DeclaredType) t.asType())) {
+                result.add(Completion.ofElement(member));
+            }
+        }
+
+        // Add ::new
+        result.add(Completion.ofKeyword("new"));
+
+        return result;
+    }
+
+    public List<Completion> completeStaticMember(TreePath cursor) {
+        var container = container(cursor.getLeaf());
+        var type = check(container);
+        var t = (TypeElement) types.asElement(type);
+        var result = new ArrayList<Completion>();
+
+        LOG.info(String.format("...completing static members of %s", t.getQualifiedName()));
+
+        // Add static members
+        for (var member : t.getEnclosedElements()) {
+            // TODO if this is a member reference :: then include non-statics
+            if (member.getModifiers().contains(Modifier.STATIC)
+                    && trees.isAccessible(scope, member, (DeclaredType) t.asType())) {
+                result.add(Completion.ofElement(member));
+            }
+        }
+
+        // Add .class
+        result.add(Completion.ofKeyword("class"));
+        result.add(Completion.ofKeyword("this"));
+        result.add(Completion.ofKeyword("super"));
+
+        return result;
+    }
+
+    public List<Completion> completeVirtualMember(TreePath cursor) {
+        var container = container(cursor.getLeaf());
+        var type = check(container);
+        if (!hasMembers(type)) {
+            LOG.warning("...don't know how to complete members of type " + type);
+            return Collections.emptyList();
+        }
+
+        var result = new ArrayList<Completion>();
+        var ts = supersWithSelf(type);
+        var alreadyAdded = new HashSet<String>();
+        LOG.info(String.format("...completing virtual members of %s and %d supers", type, ts.size()));
+        for (var t : ts) {
+            var e = types.asElement(t);
+            if (e == null) {
+                LOG.warning(String.format("...can't convert supertype `%s` to element, skipping", t));
+                continue;
+            }
+            for (var member : e.getEnclosedElements()) {
+                // Don't add statics
+                if (member.getModifiers().contains(Modifier.STATIC)) continue;
+                // Don't add constructors
+                if (member.getSimpleName().contentEquals("<init>")) continue;
+                // Skip overridden members from superclass
+                if (alreadyAdded.contains(member.toString())) continue;
+
+                // If type is a DeclaredType, check accessibility of member
+                if (type instanceof DeclaredType) {
+                    if (trees.isAccessible(scope, member, (DeclaredType) type)) {
                         result.add(Completion.ofElement(member));
                         alreadyAdded.add(member.toString());
                     }
                 }
+                // Otherwise, accessibility rules are very complicated
+                // Give up and just declare that everything is accessible
+                else {
+                    result.add(Completion.ofElement(member));
+                    alreadyAdded.add(member.toString());
+                }
             }
-            if (type instanceof ArrayType) {
-                result.add(Completion.ofKeyword("length"));
-            }
-            return result;
+        }
+        if (type instanceof ArrayType) {
+            result.add(Completion.ofKeyword("length"));
+        }
+        return result;
+    }
+
+    private Tree container(Tree select) {
+        if (select instanceof MemberSelectTree) {
+            return ((MemberSelectTree) select).getExpression();
+        } else if (select instanceof MemberReferenceTree) {
+            return ((MemberReferenceTree) select).getQualifierExpression();
+        } else {
+            throw new RuntimeException(select + " is neither select nor reference");
         }
     }
 
@@ -659,14 +666,6 @@ class Check {
         return result;
     }
 
-    private TypeMirror enclosingClass() {
-        var path = this.path;
-        while (!(path.getLeaf() instanceof ClassTree)) path = path.getParentPath();
-        var enclosingClass = trees.getElement(path);
-
-        return enclosingClass.asType();
-    }
-
     private void collectSuperMethods(TypeMirror thisType, List<ExecutableElement> result) {
         var types = task.getTypes();
 
@@ -680,7 +679,7 @@ class Check {
     }
 
     private List<ExecutableElement> superMethods() {
-        var thisType = enclosingClass();
+        var thisType = scope.getEnclosingClass().asType();
         var result = new ArrayList<ExecutableElement>();
 
         collectSuperMethods(thisType, result);
@@ -696,7 +695,7 @@ class Check {
         return true;
     }
 
-    private boolean isImported(String qualifiedName) {
+    private boolean isImported(CompilationUnitTree root, String qualifiedName) {
         var packageName = Parser.mostName(qualifiedName);
         var className = Parser.lastName(qualifiedName);
         for (var i : root.getImports()) {
@@ -755,9 +754,8 @@ class Check {
     }
 
     /** Find all identifiers in scope at line:character */
-    List<Element> scopeMembers(String partialName) {
-        var types = task.getTypes();
-        var start = trees.getScope(path);
+    private List<Element> scopeMembers(String partialName) {
+        var start = scope;
 
         class Walk {
             List<Element> result = new ArrayList<>();
@@ -882,7 +880,7 @@ class Check {
         }
     }
 
-    private void completeScopeIdentifiers(String partialName, List<Completion> result) {
+    private void completeScopeIdentifiers(CompilationUnitTree root, String partialName, List<Completion> result) {
         // Add locals
         var locals = scopeMembers(partialName);
         for (var m : locals) {
@@ -891,7 +889,7 @@ class Check {
         LOG.info(String.format("...found %d locals", locals.size()));
 
         // Add static imports
-        var staticImports = staticImports(file, partialName);
+        var staticImports = staticImports(root, partialName);
         for (var m : staticImports) {
             result.add(Completion.ofElement(m));
         }
@@ -913,7 +911,7 @@ class Check {
                 if (tooManyItems(result.size())) return;
                 if (!matchesPartialName.test(c)) continue;
                 if (isSamePackage(c, packageName) || isPublicClassFile(c)) {
-                    result.add(Completion.ofClassName(c, isImported(c)));
+                    result.add(Completion.ofClassName(c, isImported(root, c)));
                 }
             }
 
@@ -924,7 +922,7 @@ class Check {
                 if (tooManyItems(result.size())) return;
                 if (!matchesPartialName.test(c)) continue;
                 if (isSamePackage(c, packageName) || isPublicClassFile(c)) {
-                    result.add(Completion.ofClassName(c, isImported(c)));
+                    result.add(Completion.ofClassName(c, isImported(root, c)));
                     classPathNames.add(c);
                 }
             }
@@ -939,7 +937,7 @@ class Check {
                 // If file is in a different package, only a public class with the same name as the file is accessible
                 var maybePublic = matchesPartialName(file.getFileName().toString(), partialName);
                 if (samePackage || maybePublic) {
-                    result.addAll(accessibleClasses(file, partialName, packageName, classPathNames));
+                    result.addAll(accessibleClasses(root, file, partialName, packageName, classPathNames));
                 }
             }
         }
@@ -974,7 +972,8 @@ class Check {
         }
     }
 
-    private List<Completion> accessibleClasses(Path file, String partialName, String fromPackage, Set<String> skip) {
+    private List<Completion> accessibleClasses(
+            CompilationUnitTree root, Path file, String partialName, String fromPackage, Set<String> skip) {
         var parse = Parser.parse(file);
         var toPackage = Objects.toString(parse.getPackageName(), "");
         var samePackage = fromPackage.equals(toPackage) || toPackage.isEmpty();
@@ -994,12 +993,12 @@ class Check {
             // If class was already autocompleted using the classpath, skip it
             if (skip.contains(name)) continue;
             // Otherwise, add this name!
-            result.add(Completion.ofClassName(name, isImported(name)));
+            result.add(Completion.ofClassName(name, isImported(root, name)));
         }
         return result;
     }
 
-    private List<Element> staticImports(URI file, String partialName) {
+    private List<Element> staticImports(CompilationUnitTree root, String partialName) {
         var result = new ArrayList<Element>();
         for (var i : root.getImports()) {
             if (!i.isStatic()) continue;

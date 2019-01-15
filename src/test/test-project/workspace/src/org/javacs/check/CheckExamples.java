@@ -46,4 +46,5 @@ class CheckExamples {
 
 class HasField {
     int field;
+    static int staticField;
 }

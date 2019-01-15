@@ -7,6 +7,7 @@ import com.sun.source.tree.*;
 import com.sun.source.util.*;
 import java.net.URI;
 import java.util.Collections;
+import java.util.Set;
 import org.junit.Test;
 
 public class CheckTest {
@@ -14,10 +15,20 @@ public class CheckTest {
         Main.setRootFormat();
     }
 
-    private static final JavaCompilerService compiler =
-            new JavaCompilerService(Collections.emptySet(), Collections.emptySet());
+    private static final JavaCompilerService compiler = createCompiler();
     private final URI uri = FindResource.uri("/org/javacs/check/CheckExamples.java");
     private final CompileFile compile = compiler.compileFile(uri);
+
+    private static JavaCompilerService createCompiler() {
+        FileStore.setWorkspaceRoots(Set.of(LanguageServerFixture.DEFAULT_WORKSPACE_ROOT));
+        return new JavaCompilerService(Collections.emptySet(), Collections.emptySet());
+    }
+
+    @Test
+    public void matchesPartialName() {
+        assertTrue(Check.matchesPartialName("foobar", "foo"));
+        assertFalse(Check.matchesPartialName("foo", "foobar"));
+    }
 
     @Test
     public void identifier() {
@@ -33,6 +44,30 @@ public class CheckTest {
         var expr = parse("param.field");
         var type = check.check(expr);
         assertThat(type, hasToString("int"));
+    }
+
+    @Test
+    public void selectStaticField() {
+        var check = compile.check(14, 1);
+        var expr = parse("HasField.staticField");
+        var type = check.check(expr);
+        assertThat(type, hasToString("int"));
+    }
+
+    @Test
+    public void selectOtherClassStaticField() {
+        var check = compile.check(14, 1);
+        var expr = parse("OtherClass.staticField");
+        var type = check.check(expr);
+        assertThat(type, hasToString("int"));
+    }
+
+    @Test
+    public void selectFullyQualifiedStaticField() {
+        var check = compile.check(14, 1);
+        var expr = parse("org.javacs.check.OtherClass.staticField");
+        var type = check.check(expr);
+        assertThat(type, hasToString("List"));
     }
 
     @Test

@@ -337,19 +337,27 @@ class JavaLanguageServer extends LanguageServer {
         switch (cursor.get().getLeaf().getKind()) {
             case IDENTIFIER:
                 cs = check.completeIdentifiers(cursor.get());
-                isIncomplete = cs.size() >= CompileFocus.MAX_COMPLETION_ITEMS;
+                isIncomplete = cs.size() >= Check.MAX_COMPLETION_ITEMS;
                 break;
             case MEMBER_SELECT:
-                cs = check.completeMembers(cursor.get(), false);
+                if (check.isStaticMember(cursor.get())) {
+                    cs = check.completeStaticMember(cursor.get());
+                } else {
+                    cs = check.completeVirtualMember(cursor.get());
+                }
                 isIncomplete = false;
                 break;
             case MEMBER_REFERENCE:
-                cs = check.completeMembers(cursor.get(), true);
+                if (check.isStaticReference(cursor.get())) {
+                    cs = check.completeMethodReference(cursor.get());
+                } else {
+                    cs = check.completeVirtualMember(cursor.get());
+                }
                 isIncomplete = false;
                 break;
             case ANNOTATION_TYPE:
                 cs = check.completeAnnotations(cursor.get());
-                isIncomplete = cs.size() >= CompileFocus.MAX_COMPLETION_ITEMS;
+                isIncomplete = cs.size() >= Check.MAX_COMPLETION_ITEMS;
                 break;
             case CASE:
                 cs = check.completeCases(cursor.get());

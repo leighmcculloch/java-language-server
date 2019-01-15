@@ -14,7 +14,6 @@ import java.util.List;
 import java.util.Set;
 import java.util.StringJoiner;
 import java.util.stream.Collectors;
-import javax.lang.model.element.Element;
 import javax.tools.Diagnostic;
 import javax.tools.JavaFileObject;
 import org.junit.Before;
@@ -71,133 +70,6 @@ public class JavaCompilerServiceTest {
         var found = compiler.compileFocus(uri, 3, 12).element();
 
         assertThat(found, notNullValue());
-    }
-
-    private List<String> completionNames(List<Completion> found) {
-        var result = new ArrayList<String>();
-        for (var c : found) {
-            if (c.element != null) result.add(c.element.getSimpleName().toString());
-            else if (c.packagePart != null) result.add(c.packagePart.name);
-            else if (c.keyword != null) result.add(c.keyword);
-            else if (c.className != null) result.add(Parser.lastName(c.className.name));
-            else if (c.snippet != null) result.add(c.snippet.snippet);
-        }
-        return result;
-    }
-
-    private List<String> elementNames(List<Element> found) {
-        return found.stream().map(e -> e.getSimpleName().toString()).collect(Collectors.toList());
-    }
-
-    @Test
-    public void identifiers() {
-        var uri = resourceUri("CompleteIdentifiers.java");
-        var focus = compiler.compileFocus(uri, 13, 21);
-        var found = focus.scopeMembers("complete");
-        var names = elementNames(found);
-        assertThat(names, hasItem("completeLocal"));
-        assertThat(names, hasItem("completeParam"));
-        //        assertThat(names, hasItem("super"));
-        //        assertThat(names, hasItem("this"));
-        assertThat(names, hasItem("completeOtherMethod"));
-        assertThat(names, hasItem("completeInnerField"));
-        assertThat(names, hasItem("completeOuterField"));
-        assertThat(names, hasItem("completeOuterStatic"));
-        // assertThat(names, hasItem("CompleteIdentifiers"));
-    }
-
-    @Test
-    public void identifiersInMiddle() {
-        var uri = resourceUri("CompleteInMiddle.java");
-        var focus = compiler.compileFocus(uri, 13, 21);
-        var found = focus.scopeMembers("complete");
-        var names = elementNames(found);
-        assertThat(names, hasItem("completeLocal"));
-        assertThat(names, hasItem("completeParam"));
-        //        assertThat(names, hasItem("super"));
-        //        assertThat(names, hasItem("this"));
-        assertThat(names, hasItem("completeOtherMethod"));
-        assertThat(names, hasItem("completeInnerField"));
-        assertThat(names, hasItem("completeOuterField"));
-        assertThat(names, hasItem("completeOuterStatic"));
-        // assertThat(names, hasItem("CompleteInMiddle"));
-    }
-
-    @Test
-    public void completeIdentifiers() {
-        var uri = resourceUri("CompleteIdentifiers.java");
-        var ctx = compiler.parseFile(uri).completionContext(13, 21).get();
-        var focus = compiler.compileFocus(uri, ctx.line, ctx.character);
-        var found = focus.completeIdentifiers(ctx.inClass, ctx.inMethod, ctx.partialName);
-        var names = completionNames(found);
-        assertThat(names, hasItem("completeLocal"));
-        assertThat(names, hasItem("completeParam"));
-        //        assertThat(names, hasItem("super"));
-        //        assertThat(names, hasItem("this"));
-        assertThat(names, hasItem("completeOtherMethod"));
-        assertThat(names, hasItem("completeInnerField"));
-        assertThat(names, hasItem("completeOuterField"));
-        assertThat(names, hasItem("completeOuterStatic"));
-        //        assertThat(names, hasItem("CompleteIdentifiers"));
-    }
-
-    @Test
-    public void members() {
-        var uri = resourceUri("CompleteMembers.java");
-        var focus = compiler.compileFocus(uri, 3, 14);
-        var found = focus.completeMembers(false);
-        var names = completionNames(found);
-        assertThat(names, hasItem("subMethod"));
-        assertThat(names, hasItem("superMethod"));
-        assertThat(names, hasItem("equals"));
-    }
-
-    @Test
-    public void completeMembers() {
-        var uri = resourceUri("CompleteMembers.java");
-        var ctx = compiler.parseFile(uri).completionContext(3, 15).get();
-        var focus = compiler.compileFocus(uri, ctx.line, ctx.character);
-        var found = focus.completeMembers(false);
-        var names = completionNames(found);
-        assertThat(names, hasItem("subMethod"));
-        assertThat(names, hasItem("superMethod"));
-        assertThat(names, hasItem("equals"));
-    }
-
-    @Test
-    public void completeExpression() {
-        var uri = resourceUri("CompleteExpression.java");
-        var ctx = compiler.parseFile(uri).completionContext(3, 37).get();
-        var focus = compiler.compileFocus(uri, ctx.line, ctx.character);
-        var found = focus.completeMembers(false);
-        var names = completionNames(found);
-        assertThat(names, hasItem("instanceMethod"));
-        assertThat(names, not(hasItem("create")));
-        assertThat(names, hasItem("equals"));
-    }
-
-    @Test
-    public void completeClass() {
-        var uri = resourceUri("CompleteClass.java");
-        var ctx = compiler.parseFile(uri).completionContext(3, 23).get();
-        var focus = compiler.compileFocus(uri, ctx.line, ctx.character);
-        var found = focus.completeMembers(false);
-        var names = completionNames(found);
-        assertThat(names, hasItems("staticMethod", "staticField"));
-        assertThat(names, hasItems("class"));
-        assertThat(names, not(hasItem("instanceMethod")));
-        assertThat(names, not(hasItem("instanceField")));
-    }
-
-    @Test
-    public void completeImports() {
-        var uri = resourceUri("CompleteImports.java");
-        var ctx = compiler.parseFile(uri).completionContext(1, 18).get();
-        var focus = compiler.compileFocus(uri, ctx.line, ctx.character);
-        var found = focus.completeMembers(false);
-        var names = completionNames(found);
-        assertThat(names, hasItem("List"));
-        assertThat(names, hasItem("concurrent"));
     }
 
     @Test
@@ -270,11 +142,5 @@ public class JavaCompilerServiceTest {
         var uri = resourceUri("MissingImport.java");
         var qualifiedNames = compiler.compileFile(uri).fixImports();
         assertThat(qualifiedNames, hasItem("java.util.List"));
-    }
-
-    @Test
-    public void matchesPartialName() {
-        assertTrue(CompileFocus.matchesPartialName("foobar", "foo"));
-        assertFalse(CompileFocus.matchesPartialName("foo", "foobar"));
     }
 }
