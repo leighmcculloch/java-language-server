@@ -129,11 +129,7 @@ class Check {
         return empty();
     }
 
-    /**
-     * Convert an ambiguous name like a.b.c to an Element according to
-     * https://docs.oracle.com/javase/specs/jls/se11/html/jls-6.html#jls-6.5.2
-     */
-    private Element resolveAmbiguousName(MemberSelectTree select) {}
+    private TypeElement resolveSymbol(ExpressionTree t) {}
 
     private boolean isCompatible(ExecutableType method, List<TypeMirror> args) {
         var params = method.getParameterTypes();
@@ -209,11 +205,8 @@ class Check {
             var id = (IdentifierTree) t;
             return envVar(id.getName().toString()).asType();
         } else if (t instanceof MemberSelectTree) {
-            // TODO resolve ambiguous names
             var select = (MemberSelectTree) t;
-            var expr = check(select.getExpression());
-            var exprEl = types.asElement(expr);
-            if (!(exprEl instanceof TypeElement)) return empty().asType();
+            var expr = checkVar(select.getExpression());
             var members = elements.getAllMembers((TypeElement) exprEl);
             var name = select.getIdentifier();
             for (var m : members) {
