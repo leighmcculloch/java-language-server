@@ -1,5 +1,6 @@
 package org.javacs;
 
+import java.util.Arrays;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import org.javacs.lsp.*;
@@ -18,6 +19,12 @@ public class Main {
     }
 
     public static void main(String[] args) {
+        boolean quiet = Arrays.stream(args).anyMatch("--quiet"::equals);
+
+        if (quiet) {
+          LOG.setLevel(Level.OFF);
+        }
+
         try {
             // Logger.getLogger("").addHandler(new FileHandler("javacs.%u.log", false));
             setRootFormat();
