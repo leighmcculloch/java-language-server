@@ -32,8 +32,8 @@ if [ ! -e jdks/windows/jdk-11.0.1 ]; then
 fi
 
 # Set env variables to build with mac toolchain but windows target
+REAL_JAVA_HOME=$JAVA_HOME
 JAVA_HOME="./jdks/windows/jdk-11.0.1"
-REAL_JAVA_HOME=$(/usr/libexec/java_home -v 11)
 
 # Build in dist/windows
 rm -rf dist/windows
