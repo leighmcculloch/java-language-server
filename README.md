@@ -1,12 +1,27 @@
 # Language Server for Java using the [Java compiler API](https://docs.oracle.com/javase/10/docs/api/jdk.compiler-summary.html) 
 
-A Java [language server](https://github.com/Microsoft/vscode-languageserver-protocol) implemented using the Java compiler API. 
+A Java [language server](https://github.com/Microsoft/vscode-languageserver-protocol) based on v3.0 of the protocol and implemented using the Java compiler API. 
 
 [![CircleCI](https://circleci.com/gh/georgewfraser/java-language-server.png)](https://circleci.com/gh/georgewfraser/java-language-server)
 
-## Installation
+## Installation (VS Code)
 
 [Install from the VS Code marketplace](https://marketplace.visualstudio.com/items?itemName=georgewfraser.vscode-javac)
+
+## Installation (other editors)
+
+### Vim (with vim-lsc)
+
+- Checkout this repository
+- Run `./scripts/link_mac.sh`
+- Add the vim plugin [natebosch/vim-lsc](https://github.com/natebosch/vim-lsc) to your vimrc
+- Add vim-lsc configuration:
+  ```vimrc
+  let g:lsc_server_commands = {'java': '<path-to-java-language-server>/java-language-server/dist/mac/bin/launcher --quiet'}
+  ```
+- See the [vim-lsc README](https://github.com/natebosch/vim-lsc/blob/master/README.md) for other configuration options.
+
+Note: This tool is not compatible with [vim-lsp](https://github.com/prabirshrestha/vim-lsp) as it only supports LSPv2.0.
 
 ## [Issues](https://github.com/georgewfraser/java-language-server/issues)
 
