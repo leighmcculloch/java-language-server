@@ -5,11 +5,8 @@
 
 set -e
 
-# Needed if you have a java version other than 11 as default
-# and used if java_home is available
-if [ -f /usr/libexec/java_home ] ; then
-  JAVA_HOME=$(/usr/libexec/java_home -v 11)
-fi
+# Check JAVA_HOME points to java 11
+./scripts/check_java_home.sh
 
 # Download Gson jar
 cd modules

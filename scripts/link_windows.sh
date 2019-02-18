@@ -3,15 +3,8 @@
 
 set -e
 
-# Needed if you have a java version other than 11 as default
-echo "JAVA_HOME is set to: $JAVA_HOME"
-if [[ "$OSTYPE" == "linux-gnu" ]]; then
-  JAVA_HOME='/usr/lib/jvm/java-11-openjdk-amd64'
-  echo "JAVA_HOME overrided to be: $JAVA_HOME"
-elif [[ "$OSTYPE" == "darwin"* ]]; then
-  JAVA_HOME=$(/usr/libexec/java_home -v 11)
-  echo "JAVA_HOME overrided to be: $JAVA_HOME"
-fi
+# Check JAVA_HOME points to correct java version
+./scripts/check_java_home.sh
 
 # Compile sources
 mvn compile
