@@ -1,15 +1,22 @@
 package org.javacs;
 
+import java.io.File;
+import java.lang.System;
+import java.util.Optional;
 import java.nio.file.*;
 
 class Lib {
-    static Path installRoot() {
-        var root = Paths.get(".").toAbsolutePath();
-        var p = root;
-        while (p != null && !Files.exists(p.resolve("javaLsFlag.txt"))) p = p.getParent();
-        if (p == null) throw new RuntimeException("Couldn't find javaLsFlag.txt in any parent of " + root);
-        return p;
+    static Optional<Path> srcZipPath() {
+        return Optional.ofNullable(System.getenv("JAVA_HOME"))
+            .flatMap(home -> Optional.of(Paths.get(home).resolve("lib/src.zip")))
+            .flatMap(path -> {
+                if (path.toFile().exists()) {
+                    return Optional.of(path);
+                } else {
+                    return Optional.empty();
+                }
+            });
     }
 
-    static final Path SRC_ZIP = installRoot().resolve("lib/src.zip");
+    static final Optional<Path> SRC_ZIP = srcZipPath();
 }
