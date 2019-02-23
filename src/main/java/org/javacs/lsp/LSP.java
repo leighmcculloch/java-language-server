@@ -242,6 +242,7 @@ public class LSP {
                     case "shutdown":
                         {
                             LOG.warning("Got shutdown message");
+                            respond(send, r.id, null);
                             break;
                         }
                     case "exit":
