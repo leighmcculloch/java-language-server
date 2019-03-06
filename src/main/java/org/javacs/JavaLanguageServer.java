@@ -641,15 +641,17 @@ class JavaLanguageServer extends LanguageServer {
         var el = activeFileCache.element(line, column);
         if (!el.isPresent()) return Optional.empty();
 
-        // Add code hover message
         var result = new ArrayList<MarkedString>();
-        var code = hoverCode(el.get());
-        result.add(new MarkedString("java.hover", code));
+
         // Add docs hover message
         var docs = hoverDocs(el.get());
         if (docs.isPresent()) {
-            result.add(new MarkedString("markdown", docs.get()));
+            result.add(new MarkedString(docs.get()));
         }
+
+        // Add code hover message
+        var code = hoverCode(el.get());
+        result.add(new MarkedString("java", code));
 
         return Optional.of(new Hover(result));
     }
