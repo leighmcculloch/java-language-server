@@ -32,6 +32,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.StringJoiner;
 import java.util.UUID;
+import java.util.function.Predicate;
 import java.util.logging.Logger;
 import javax.lang.model.element.Element;
 import javax.lang.model.element.ExecutableElement;
@@ -645,9 +646,9 @@ class JavaLanguageServer extends LanguageServer {
 
         // Add docs hover message
         var docs = hoverDocs(el.get());
-        if (docs.isPresent()) {
-            result.add(new MarkedString(docs.get()));
-        }
+        docs.filter(Predicate.not(String::isBlank)).ifPresent(doc -> {
+            result.add(new MarkedString(doc));
+        });
 
         // Add code hover message
         var code = hoverCode(el.get());
